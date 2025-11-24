@@ -1,0 +1,47 @@
+0 verbose cli /usr/local/bin/node /usr/local/bin/npm
+1 info using npm@10.8.2
+2 info using node@v20.19.5
+3 silly config load:file:/usr/local/lib/node_modules/npm/npmrc
+4 silly config load:file:/Users/sivasankaranrajasekaran/Desktop/crmdash/.npmrc
+5 silly config load:file:/Users/sivasankaranrajasekaran/.npmrc
+6 silly config load:file:/usr/local/etc/npmrc
+7 verbose title npm install @supabase/supabase-js
+8 verbose argv "install" "@supabase/supabase-js" "--cache" ".npm-cache" "--prefer-offline" "--no-audit" "--progress" "false" "--registry" "https://registry.npmjs.org"
+9 verbose logfile logs-max:10 dir:/Users/sivasankaranrajasekaran/Desktop/crmdash/.npm-cache/_logs/2025-11-20T18_55_39_397Z-
+10 verbose logfile /Users/sivasankaranrajasekaran/Desktop/crmdash/.npm-cache/_logs/2025-11-20T18_55_39_397Z-debug-0.log
+11 silly packumentCache heap:2197815296 maxSize:549453824 maxEntrySize:274726912
+12 silly logfile done cleaning log files
+13 silly idealTree buildDeps
+14 silly fetch manifest @supabase/supabase-js@*
+15 silly packumentCache full:https://registry.npmjs.org/@supabase%2fsupabase-js cache-miss
+16 verbose shrinkwrap failed to load node_modules/.package-lock.json out of date, updated: node_modules
+17 http fetch GET https://registry.npmjs.org/@supabase%2fsupabase-js attempt 1 failed with ENOTFOUND
+18 http fetch GET https://registry.npmjs.org/@supabase%2fsupabase-js attempt 2 failed with ENOTFOUND
+19 http fetch GET https://registry.npmjs.org/@supabase%2fsupabase-js attempt 3 failed with ENOTFOUND
+20 silly placeDep ROOT @supabase/supabase-js@ OK for: crmdash@0.1.0 want: *
+21 verbose type system
+22 verbose stack FetchError: request to https://registry.npmjs.org/@supabase%2fsupabase-js failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org
+22 verbose stack     at ClientRequest.<anonymous> (/usr/local/lib/node_modules/npm/node_modules/minipass-fetch/lib/index.js:130:14)
+22 verbose stack     at ClientRequest.emit (node:events:524:28)
+22 verbose stack     at emitErrorEvent (node:_http_client:101:11)
+22 verbose stack     at _destroy (node:_http_client:884:9)
+22 verbose stack     at onSocketNT (node:_http_client:904:5)
+22 verbose stack     at process.processTicksAndRejections (node:internal/process/task_queues:83:21)
+23 error code ENOTFOUND
+24 error syscall getaddrinfo
+25 error errno ENOTFOUND
+26 error network request to https://registry.npmjs.org/@supabase%2fsupabase-js failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org
+27 error network This is a problem related to network connectivity.
+27 error network In most cases you are behind a proxy or have bad network settings.
+27 error network
+27 error network If you are behind a proxy, please make sure that the
+27 error network 'proxy' config is set properly.  See: 'npm help config'
+28 silly unfinished npm timer reify 1763664939645
+29 silly unfinished npm timer reify:loadTrees 1763664939646
+30 verbose cwd /Users/sivasankaranrajasekaran/Desktop/crmdash
+31 verbose os Darwin 25.1.0
+32 verbose node v20.19.5
+33 verbose npm  v10.8.2
+34 verbose exit 1
+35 verbose code 1
+36 error A complete log of this run can be found in: /Users/sivasankaranrajasekaran/Desktop/crmdash/.npm-cache/_logs/2025-11-20T18_55_39_397Z-debug-0.log
