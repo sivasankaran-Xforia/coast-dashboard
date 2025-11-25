@@ -42,7 +42,7 @@ function App() {
         </div>
 
         <div className="max-w-6xl mx-auto text-left mt-4 mb-6">
-          <h1 className="text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-100 via-white to-emerald-200 mt-2 drop-shadow-[0_4px_18px_rgba(16,185,129,0.35)]">
+          <h1 className="text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-white via-emerald-100 to-white mt-2 drop-shadow-[0_6px_20px_rgba(16,185,129,0.45)]">
             Unified Analytical Dashboard
           </h1>
           <p className="text-emerald-100/80 mt-3 text-sm md:text-base max-w-3xl">
