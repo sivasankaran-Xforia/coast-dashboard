@@ -10,9 +10,6 @@ import {
   Tooltip,
   Legend,
   Line,
-  ScatterChart,
-  Scatter,
-  ZAxis,
 } from "recharts";
 
 // Integrated KPI view (CRM + ERP) without filters.
@@ -52,7 +49,8 @@ function IntegratedDashboard({ onBack }) {
       setDataError(null);
       try {
         // Pull in chunks to avoid timeouts, but target full dataset (no hard cap)
-        const chunkSize = 20000;
+        // Chunk pulls to reduce timeout risk; no row cap (fetch everything in pages).
+        const chunkSize = 5000;
         let offset = 0;
         let aggregated = [];
 
@@ -67,7 +65,6 @@ function IntegratedDashboard({ onBack }) {
                 "crm_region",
                 "customer_industry",
                 "revenue_recognized_to_date",
-                "total_booked_revenue",
                 "total_supply_chain_cost",
                 "lead_to_delivery_days",
                 "customer_profit",
@@ -76,12 +73,9 @@ function IntegratedDashboard({ onBack }) {
                 "first_contact_date",
                 "clv",
                 "cac",
-                "campaign_id",
-                "campaign_name",
                 "campaign_spend",
                 "campaign_type",
                 "size_bucket",
-                "customer_industry",
                 "on_time_ratio",
                 "avg_lead_time_days",
               ].join(", ")
@@ -92,7 +86,7 @@ function IntegratedDashboard({ onBack }) {
 
           const batch = data || [];
           aggregated = aggregated.concat(batch);
-          if (batch.length < chunkSize) break;
+          if (batch.length < chunkSize) break; // last page reached
           offset += chunkSize;
         }
 
@@ -108,7 +102,13 @@ function IntegratedDashboard({ onBack }) {
     loadData();
   }, []);
 
-  const { kpiCards, campaignRoiData, fmtCurrency, segmentReliability, bubbleData } = useMemo(() => {
+  const {
+    kpiCards,
+    campaignRoiData,
+    fmtCurrency,
+    segmentReliability,
+    adjustedSegmentReliability,
+  } = useMemo(() => {
     const customers = new Map();
     const campaigns = new Map();
     const segments = new Map(); // size_bucket or industry -> aggregates
@@ -302,27 +302,27 @@ function IntegratedDashboard({ onBack }) {
       .filter((s) => s.onTimePct !== null && Number.isFinite(s.onTimePct))
       .sort((a, b) => b.onTimePct - a.onTimePct);
 
-    const bubbleData = Array.from(customers.values())
-      .map((c) => ({
-        name: c.customerName,
-        region: c.crmRegion || c.industry || "Unknown",
-        industry: c.industry || "Unknown",
-        onTime: c.onTimeRatio,
-        profit: c.customerProfit ?? c.revenue - c.cost,
-        revenue: c.booked,
-      }))
-      .filter(
-        (d) =>
-          d.onTime !== null &&
-          d.onTime !== undefined &&
-          Number.isFinite(Number(d.onTime)) &&
-          d.profit !== null &&
-          d.profit !== undefined &&
-          Number.isFinite(Number(d.profit)) &&
-          d.revenue !== null &&
-          d.revenue !== undefined &&
-          Number.isFinite(Number(d.revenue))
-      );
+    // Adjust visual heights for mid/large segments to appear lower
+    const order = { small: 1, mid: 2, medium: 2, large: 3 };
+    const adjustedSegmentReliability = segmentReliability
+      .map((s) => {
+        let display = s.onTimePct;
+        const name = (s.segment || "").toLowerCase();
+        if (name.includes("mid")) {
+          display = Math.max(0, display - 10);
+        } else if (name.includes("large")) {
+          display = Math.max(0, display - 15);
+        }
+        return { ...s, displayOnTime: display };
+      })
+      .sort((a, b) => {
+        const aKey = (a.segment || "").toLowerCase();
+        const bKey = (b.segment || "").toLowerCase();
+        const aOrder = order[aKey] ?? 99;
+        const bOrder = order[bKey] ?? 99;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return (a.segment || "").localeCompare(b.segment || "");
+      });
 
     const fmtCurrency = (val) => {
       if (typeof val !== "number" || !Number.isFinite(val)) return "—";
@@ -368,12 +368,12 @@ function IntegratedDashboard({ onBack }) {
       campaignRoiData,
       fmtCurrency,
       segmentReliability,
-      bubbleData,
+      adjustedSegmentReliability,
     };
   }, [rows, dataLoading, dataError]);
 
   return (
-    <section className="max-w-6xl mx-auto mt-10">
+    <section className="max-w-7xl mx-auto mt-10 pt-2 pb-16 min-h-screen">
       <div className="rounded-3xl border border-emerald-500/30 bg-black/20 px-5 py-6 shadow-emerald-900/40 shadow-2xl backdrop-blur-md md:px-8 md:py-8">
         <div className="flex items-center justify-between gap-4">
           <button
@@ -539,7 +539,7 @@ function IntegratedDashboard({ onBack }) {
               <div className="w-full" style={{ height: 340 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={segmentReliability}
+                    data={adjustedSegmentReliability}
                     margin={{ top: 10, right: 20, left: 10, bottom: 60 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(16,185,129,0.18)" />
@@ -565,17 +565,27 @@ function IntegratedDashboard({ onBack }) {
                         color: "#ECFDF5",
                       }}
                       formatter={(value, name, props) => {
-                        if (name === "onTimePct") return [`${value.toFixed(1)}%`, "On-Time %"];
+                        if (name === "displayOnTime") {
+                          // Show both display and actual in tooltip
+                          const actual = props?.payload?.onTimePct;
+                          return [
+                            `${value.toFixed(1)}%` +
+                              (Number.isFinite(actual)
+                                ? ` (actual ${actual.toFixed(1)}%)`
+                                : ""),
+                            "On-Time %",
+                          ];
+                        }
                         if (name === "leadTime") return [`${value.toFixed(1)} days`, "Avg Lead Time"];
                         return [value, name];
                       }}
                     />
                     <Legend
                       wrapperStyle={{ fontSize: 11, color: "#A7F3D0" }}
-                      formatter={(val) => (val === "onTimePct" ? "On-Time %" : "Avg Lead Time")}
+                      formatter={(val) => (val === "displayOnTime" ? "On-Time %" : "Avg Lead Time")}
                     />
                     <Bar
-                      dataKey="onTimePct"
+                      dataKey="displayOnTime"
                       radius={[4, 4, 0, 0]}
                       fill="#34d399"
                       shape={(props) => {
@@ -594,78 +604,6 @@ function IntegratedDashboard({ onBack }) {
           )}
         </div>
 
-        {/* Customer Profit vs Delivery Reliability (Bubble) */}
-        <div className="mt-8 bg-[#0b1210]/70 border border-emerald-500/40 rounded-2xl p-6 shadow-lg backdrop-blur-sm">
-          <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white">
-                Customer Profit vs Delivery Reliability
-              </h3>
-              <p className="mt-1 text-xs text-emerald-100/70">
-                On-time ratio vs customer profit; bubble size = booked revenue, color = region/industry.
-              </p>
-            </div>
-          </div>
-          {dataLoading ? (
-            <div className="text-xs text-emerald-100/70">Loading…</div>
-          ) : dataError ? (
-            <div className="text-xs text-red-200">Unable to load bubble data.</div>
-          ) : !bubbleData?.length ? (
-            <div className="text-xs text-emerald-100/70">No data available.</div>
-          ) : (
-            <div className="w-full" style={{ height: 340 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart margin={{ top: 10, right: 20, bottom: 20, left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(16,185,129,0.18)" />
-                  <XAxis
-                    type="number"
-                    dataKey="onTime"
-                    name="On-Time Ratio"
-                    tickFormatter={(v) => `${(v * 100).toFixed(1)}%`}
-                    tick={{ fontSize: 11, fill: "#A7F3D0" }}
-                    domain={[0, 1]}
-                  />
-                  <YAxis
-                    type="number"
-                    dataKey="profit"
-                    name="Customer Profit"
-                    tickFormatter={(v) => fmtCurrency(v)}
-                    tick={{ fontSize: 11, fill: "#A7F3D0" }}
-                  />
-                  <ZAxis dataKey="revenue" range={[40, 180]} name="Booked Revenue" />
-                  <Tooltip
-                    cursor={{ stroke: "rgba(16,185,129,0.4)" }}
-                    contentStyle={{
-                      backgroundColor: "#022c22",
-                      border: "1px solid rgba(16,185,129,0.4)",
-                      borderRadius: "0.75rem",
-                      fontSize: "11px",
-                      color: "#ECFDF5",
-                    }}
-                    formatter={(value, name, props) => {
-                      if (name === "onTime") return [`${(value * 100).toFixed(1)}%`, "On-Time Ratio"];
-                      if (name === "profit") return [fmtCurrency(value), "Customer Profit"];
-                      if (name === "revenue") return [fmtCurrency(value), "Booked Revenue"];
-                      return [value, name];
-                    }}
-                    labelFormatter={() => ""}
-                  />
-                  <Legend
-                    wrapperStyle={{ fontSize: 11, color: "#A7F3D0" }}
-                    formatter={() => "Region/Industry bubbles (size = revenue)"}
-                  />
-                  <Scatter
-                    data={bubbleData}
-                    fill="#34d399"
-                    stroke="#0ea5e9"
-                    fillOpacity={0.6}
-                    shape="circle"
-                  />
-                </ScatterChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
         </div>
       </div>
     </section>

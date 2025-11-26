@@ -15,17 +15,17 @@ function App() {
   const [view, setView] = useState(VIEWS.LANDING);
 
   const handleAreaClick = (id) => {
-    // toggle selection on landing; reset view when switching away
-    if (id === "integrated") {
-      setView(VIEWS.INTEGRATED);
-    } else if (id === "crm") {
-      setView(VIEWS.CRM_MARKETING);
-    } else if (id === "erp") {
-      setView(VIEWS.ERP);
-    } else {
+    // Toggle selection; if clicking the active card, collapse back to landing
+    if (id === activeArea) {
+      setActiveArea(null);
       setView(VIEWS.LANDING);
+      return;
     }
-    setActiveArea(id === activeArea ? null : id);
+    setActiveArea(id);
+    if (id === "integrated") setView(VIEWS.INTEGRATED);
+    else if (id === "crm") setView(VIEWS.CRM_MARKETING);
+    else if (id === "erp") setView(VIEWS.ERP);
+    else setView(VIEWS.LANDING);
   };
 
   // ===== LANDING VIEW (CRM & ERP + modules) =====
@@ -86,7 +86,7 @@ function App() {
             </p>
             <div className="mt-5 flex items-center gap-2 text-xs text-emerald-100/60 group-hover:text-emerald-50">
               <span className="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
-              Click to open the integrated view (under construction)
+              Click to open the integrated view
             </div>
           </button>
 
