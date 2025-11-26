@@ -1,10 +1,12 @@
 import React, { useState } from "react";
 import MarketingDashboard from "./pages/MarketingDashboard";
 import ERPDashboard from "./pages/ERPDashboard";
+import IntegratedDashboard from "./pages/IntegratedDashboard";
 
 const VIEWS = {
   LANDING: "landing",
   CRM_MARKETING: "crm-marketing",
+  INTEGRATED: "integrated",
   ERP: "erp",
 };
 
@@ -14,7 +16,13 @@ function App() {
 
   const handleAreaClick = (id) => {
     // toggle selection on landing; reset view when switching away
-    if (id !== "crm" && id !== "erp") {
+    if (id === "integrated") {
+      setView(VIEWS.INTEGRATED);
+    } else if (id === "crm") {
+      setView(VIEWS.CRM_MARKETING);
+    } else if (id === "erp") {
+      setView(VIEWS.ERP);
+    } else {
       setView(VIEWS.LANDING);
     }
     setActiveArea(id === activeArea ? null : id);
@@ -36,7 +44,7 @@ function App() {
         </div>
       </header>
 
-      <main className="flex-1 w-full">
+      <main className="flex-1 w-full pb-6">
         <div className="max-w-6xl mx-auto text-center text-emerald-200 uppercase tracking-[0.18em] text-[11px] md:text-xs mt-2">
           Unified Intelligence Hub
         </div>
@@ -54,9 +62,9 @@ function App() {
         {/* TOP-LEVEL AREA CARDS: Integrated / CRM / ERP */}
         <div className="max-w-6xl mx-auto mt-8 grid gap-6 md:grid-cols-3">
           {/* INTEGRATED CARD */}
-          <button
-            onClick={() => handleAreaClick("integrated")}
-            className={`group text-left bg-[#0b1210]/60 border rounded-2xl p-6 shadow-lg backdrop-blur-sm
+        <button
+          onClick={() => handleAreaClick("integrated")}
+          className={`group text-left bg-[#0b1210]/60 border rounded-2xl p-6 shadow-lg backdrop-blur-sm
                      transition-all duration-200 hover:-translate-y-1
                      ${
                        activeArea === "integrated"
@@ -174,9 +182,18 @@ function App() {
             }}
           />
         )}
+
+        {view === VIEWS.INTEGRATED && (
+          <IntegratedDashboard
+            onBack={() => {
+              setView(VIEWS.LANDING);
+              setActiveArea(null);
+            }}
+          />
+        )}
       </main>
 
-      <footer className="max-w-6xl mx-auto w-full mt-10 pt-6 border-t border-emerald-500/20 text-emerald-100/80 text-sm text-center">
+      <footer className="max-w-6xl mx-auto w-full mt-4 pb-4 pt-4 border-t border-emerald-500/20 text-emerald-100/80 text-sm text-center">
         © 2025 Xforia COAST - All Rights Reserved.
       </footer>
     </div>
