@@ -410,7 +410,7 @@ function ERPDashboard({ onBack }) {
 
   return (
     <section className="max-w-7xl mx-auto mt-10">
-      <div className="rounded-3xl border border-emerald-500/30 bg-black/20 px-5 py-6 shadow-emerald-900/40 shadow-2xl backdrop-blur-md md:px-8 md:py-8">
+      <div className="rounded-3xl border border-emerald-500/40 bg-gradient-to-b from-emerald-900 via-emerald-800 to-emerald-900 px-5 py-6 shadow-emerald-900/40 shadow-2xl md:px-8 md:py-8">
         {/* Top bar with back button + breadcrumb */}
         <div className="flex items-center justify-between gap-4">
           <button

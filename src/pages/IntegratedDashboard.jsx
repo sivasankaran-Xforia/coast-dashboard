@@ -2,94 +2,167 @@ import React, { useEffect, useMemo, useState } from "react";
 import supabase from "../lib/supabaseClient";
 import {
   ResponsiveContainer,
-  BarChart,
-  Bar,
+  LineChart,
+  Line,
+  CartesianGrid,
   XAxis,
   YAxis,
-  CartesianGrid,
   Tooltip,
   Legend,
-  Line,
 } from "recharts";
 
-// Integrated KPI view (CRM + ERP) without filters.
-// Computes the four requested KPIs client-side from crm.crm_erp_funnel_view:
-// 1) Customer True Profitability
-// 2) Gross Margin %
-// 3) Lead-to-Delivery Cycle Time (avg days)
-// 4) CLV : CAC Ratio
-//
-// Assumed columns in the view:
-// - customer_id
-// - revenue_recognized_to_date
-// - total_cost                  (procurement total_cost, per row)
-// - last_movement_date          (inventory "delivery" timestamp)
-// - contact_date                (lead first contact)
-// - clv
-// - cac
-//
-// Logic:
-// - Aggregate per customer:
-//     revenue sum, supply_chain_cost sum, earliest contact_date,
-//     earliest delivery_date, clv, cac
-// - KPIs:
-//     customer_profit = sum(revenue) - sum(cost)
-//     gross_margin_pct = customer_profit / sum(revenue)
-//     lead_to_delivery_days = avg( earliest_delivery - earliest_contact ) over customers with both dates
-//     clv_cac_ratio = avg( clv / cac ) over customers with cac > 0
+// Shared transformer: filters rows, groups by PO, returns chart-ready data and risk summary
+export function transformRowsToPOLevel(rows, filters) {
+  const eqi = (a, b) => {
+    if (a === null || a === undefined || b === null || b === undefined) return false;
+    return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  };
+
+  const filtered = rows.filter((r) => {
+    if (filters.customer !== "All" && !eqi(r.customer_name, filters.customer)) return false;
+    if (filters.part !== "All" && !eqi(r.part_name, filters.part)) return false;
+    if (filters.supplier !== "All" && !eqi(r.supplier_name, filters.supplier)) return false;
+    return true;
+  });
+
+  const groups = new Map();
+  filtered.forEach((r, idx) => {
+    const key = r.po_number || `po-${idx}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        po_number: key,
+        po_creation_date: r.po_creation_date || null,
+        total_cost: 0,
+        lead_time_days_sum: 0,
+        lead_time_days_count: 0,
+        defect_quantity: 0,
+        produced_quantity: 0,
+        good_pieces: 0,
+        oee_pct_sum: 0,
+        oee_pct_count: 0,
+        risk_score: r.risk_score !== null && r.risk_score !== undefined ? Number(r.risk_score) : null,
+        risk_level: r.risk_level || null,
+      });
+    }
+    const g = groups.get(key);
+
+    const cost = Number(r.total_cost);
+    if (!Number.isNaN(cost)) g.total_cost += cost;
+
+    const ltd = Number(r.lead_time_days);
+    if (!Number.isNaN(ltd)) {
+      g.lead_time_days_sum += ltd;
+      g.lead_time_days_count += 1;
+    }
+
+    const defect = Number(r.defect_quantity);
+    if (!Number.isNaN(defect)) g.defect_quantity += defect;
+
+    const produced = Number(r.produced_quantity);
+    if (!Number.isNaN(produced)) g.produced_quantity += produced;
+
+    const good = Number(r.good_pieces);
+    if (!Number.isNaN(good)) g.good_pieces += good;
+
+    const oee = Number(r.oee_pct);
+    if (!Number.isNaN(oee)) {
+      g.oee_pct_sum += oee;
+      g.oee_pct_count += 1;
+    }
+
+    // Keep highest risk_score and its level if multiple rows
+    const rowRisk = r.risk_score !== null && r.risk_score !== undefined ? Number(r.risk_score) : null;
+    if (rowRisk !== null && (g.risk_score === null || rowRisk > g.risk_score)) {
+      g.risk_score = rowRisk;
+      g.risk_level = r.risk_level || g.risk_level;
+    }
+  });
+
+  const poLevelData = Array.from(groups.values())
+    .map((g) => ({
+      po_number: g.po_number,
+      po_creation_date: g.po_creation_date,
+      total_cost: g.total_cost,
+      lead_time_days:
+        g.lead_time_days_count > 0 ? g.lead_time_days_sum / g.lead_time_days_count : null,
+      defect_quantity: g.defect_quantity,
+      produced_quantity: g.produced_quantity,
+      good_pieces: g.good_pieces,
+      oee_pct: g.oee_pct_count > 0 ? g.oee_pct_sum / g.oee_pct_count : null,
+      risk_score: g.risk_score,
+      risk_level: g.risk_level,
+    }))
+    .sort((a, b) => {
+      const da = a.po_creation_date ? new Date(a.po_creation_date).getTime() : Infinity;
+      const db = b.po_creation_date ? new Date(b.po_creation_date).getTime() : Infinity;
+      return da - db;
+    });
+
+  // Risk summary: highest risk_score/level
+  let riskScore = null;
+  let riskLevel = "No Data";
+  if (poLevelData.length) {
+    poLevelData.forEach((p) => {
+      if (p.risk_score !== null && p.risk_score !== undefined) {
+        if (riskScore === null || p.risk_score > riskScore) {
+          riskScore = p.risk_score;
+          riskLevel = p.risk_level || "No Data";
+        }
+      }
+    });
+    if (riskScore === null) riskLevel = "No Data";
+  }
+
+  return { poLevelData, riskSummary: { riskScore, riskLevel } };
+}
 
 function IntegratedDashboard({ onBack }) {
   const [rows, setRows] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState(null);
+  const [filters, setFilters] = useState({
+    customer: "All",
+    part: "All",
+    supplier: "All",
+  });
 
   useEffect(() => {
     const loadData = async () => {
       setDataLoading(true);
       setDataError(null);
       try {
-        // Pull in chunks to avoid timeouts, but target full dataset (no hard cap)
-        // Chunk pulls to reduce timeout risk; no row cap (fetch everything in pages).
         const chunkSize = 5000;
         let offset = 0;
         let aggregated = [];
-
         while (true) {
           const { data, error } = await supabase
             .schema("crm")
             .from("crm_erp_funnel_view")
             .select(
               [
-                "customer_id",
                 "customer_name",
-                "crm_region",
-                "customer_industry",
-                "revenue_recognized_to_date",
-                "total_supply_chain_cost",
-                "lead_to_delivery_days",
-                "customer_profit",
-                "gross_margin_pct",
-                "inventory_last_movement_date",
-                "first_contact_date",
-                "clv",
-                "cac",
-                "campaign_spend",
-                "campaign_type",
-                "size_bucket",
-                "on_time_ratio",
-                "avg_lead_time_days",
+                "part_name",
+                "supplier_name",
+                "po_number",
+                "po_creation_date",
+                "total_cost",
+                "lead_time_days",
+                "defect_quantity",
+                "produced_quantity",
+                "good_pieces",
+                "oee_pct",
+                "risk_score",
+                "risk_level",
               ].join(", ")
             )
             .range(offset, offset + chunkSize - 1);
 
           if (error) throw error;
-
           const batch = data || [];
           aggregated = aggregated.concat(batch);
-          if (batch.length < chunkSize) break; // last page reached
+          if (batch.length < chunkSize) break;
           offset += chunkSize;
         }
-
         setRows(aggregated);
       } catch (err) {
         console.error(err);
@@ -98,283 +171,65 @@ function IntegratedDashboard({ onBack }) {
         setDataLoading(false);
       }
     };
-
     loadData();
   }, []);
 
-  const {
-    kpiCards,
-    campaignRoiData,
-    fmtCurrency,
-    segmentReliability,
-    adjustedSegmentReliability,
-  } = useMemo(() => {
-    const customers = new Map();
-    const campaigns = new Map();
-    const segments = new Map(); // size_bucket or industry -> aggregates
-
-    rows.forEach((r) => {
-      const id = r.customer_id ?? "unknown";
-      if (!customers.has(id)) {
-        customers.set(id, {
-          customerName: r.customer_name || id,
-          crmRegion: r.crm_region || "Unknown",
-          industry: r.customer_industry || "Unknown",
-          revenue: 0,
-          booked: 0,
-          cost: 0,
-          contact: null,
-          delivery: null, // inventory_last_movement_date fallback
-          leadToDeliveryDays: null, // use precomputed when present
-          clv: null,
-          cac: null,
-          customerProfit: null,
-          grossMarginPct: null,
-          onTimeRatio: null,
-        });
-      }
-      const c = customers.get(id);
-      const rev = Number(r.revenue_recognized_to_date);
-      if (!Number.isNaN(rev)) c.revenue += rev;
-
-      const booked = Number(r.total_booked_revenue);
-      if (!Number.isNaN(booked)) c.booked += booked;
-
-      const cost = Number(r.total_supply_chain_cost);
-      if (!Number.isNaN(cost)) c.cost += cost;
-
-      if (r.customer_profit !== null && r.customer_profit !== undefined) {
-        const cp = Number(r.customer_profit);
-        if (!Number.isNaN(cp)) c.customerProfit = (c.customerProfit ?? 0) + cp;
-      }
-
-      if (r.gross_margin_pct !== null && r.gross_margin_pct !== undefined) {
-        const gm = Number(r.gross_margin_pct);
-        if (!Number.isNaN(gm)) c.grossMarginPct = gm;
-      }
-
-      if (r.first_contact_date) {
-        const d = new Date(r.first_contact_date);
-        if (!Number.isNaN(d.getTime())) {
-          if (!c.contact || d < c.contact) c.contact = d;
-        }
-      }
-
-      if (r.inventory_last_movement_date) {
-        const d = new Date(r.inventory_last_movement_date);
-        if (!Number.isNaN(d.getTime())) {
-          if (!c.delivery || d < c.delivery) c.delivery = d;
-        }
-      }
-
-      if (r.lead_to_delivery_days !== null && r.lead_to_delivery_days !== undefined) {
-        const ltd = Number(r.lead_to_delivery_days);
-        if (!Number.isNaN(ltd)) c.leadToDeliveryDays = ltd;
-      }
-
-      const clv = Number(r.clv);
-      if (!Number.isNaN(clv)) c.clv = clv;
-
-      const cac = Number(r.cac);
-      if (!Number.isNaN(cac)) c.cac = cac;
-
-      // Campaign aggregation
-      if (r.campaign_type) {
-        const cid = r.campaign_type;
-        if (!campaigns.has(cid)) {
-          campaigns.set(cid, {
-            campaign_id: cid,
-            campaign_name: r.campaign_type || cid,
-            revenue: 0,
-            cost: 0,
-            spend: 0,
-          });
-        }
-        const camp = campaigns.get(cid);
-        if (!Number.isNaN(rev)) camp.revenue += rev;
-        if (!Number.isNaN(cost)) camp.cost += cost;
-        const spend = Number(r.campaign_spend);
-        if (!Number.isNaN(spend)) camp.spend += spend;
-      }
-
-      // Segment aggregation (size bucket preferred, fallback industry)
-      const segKey = r.size_bucket || r.customer_industry || "Unknown";
-      if (!segments.has(segKey)) {
-        segments.set(segKey, { segment: segKey, onTimeSum: 0, onTimeCount: 0, leadTimeSum: 0, leadTimeCount: 0 });
-      }
-      const seg = segments.get(segKey);
-      if (r.on_time_ratio !== null && r.on_time_ratio !== undefined) {
-        const val = Number(r.on_time_ratio);
-        if (!Number.isNaN(val)) {
-          seg.onTimeSum += val;
-          seg.onTimeCount += 1;
-        }
-      }
-      if (r.avg_lead_time_days !== null && r.avg_lead_time_days !== undefined) {
-        const val = Number(r.avg_lead_time_days);
-        if (!Number.isNaN(val)) {
-          seg.leadTimeSum += val;
-          seg.leadTimeCount += 1;
-        }
-      }
-
-      if (r.on_time_ratio !== null && r.on_time_ratio !== undefined) {
-        const otr = Number(r.on_time_ratio);
-        if (!Number.isNaN(otr)) {
-          c.onTimeRatio = otr;
-        }
-      }
-    });
-
-    let totalRevenue = 0;
-    let leadDeliverySum = 0;
-    let leadDeliveryCount = 0;
-    let clvCacSum = 0;
-    let clvCacCount = 0;
-
-    customers.forEach((c) => {
-      totalRevenue += c.revenue;
-
-      if (c.leadToDeliveryDays !== null && c.leadToDeliveryDays !== undefined) {
-        const diff = Number(c.leadToDeliveryDays);
-        if (Number.isFinite(diff)) {
-          leadDeliverySum += diff;
-          leadDeliveryCount += 1;
-        }
-      } else if (c.contact && c.delivery) {
-        const diffDays = (c.delivery - c.contact) / (1000 * 60 * 60 * 24);
-        if (Number.isFinite(diffDays)) {
-          leadDeliverySum += diffDays;
-          leadDeliveryCount += 1;
-        }
-      }
-
-      if (c.cac && c.cac > 0 && c.clv !== null && c.clv !== undefined) {
-        const ratio = c.clv / c.cac;
-        if (Number.isFinite(ratio)) {
-          clvCacSum += ratio;
-          clvCacCount += 1;
-        }
-      }
-    });
-
-    const customerProfit = customers.size
-      ? Array.from(customers.values()).reduce((sum, c) => {
-          if (c.customerProfit !== null && c.customerProfit !== undefined) {
-            return sum + c.customerProfit;
-          }
-          return sum + (c.revenue - c.cost);
-        }, 0)
-      : 0;
-
-    const grossMarginPct =
-      totalRevenue > 0
-        ? ((customerProfit) / totalRevenue) * 100
-        : null;
-    const leadToDelivery =
-      leadDeliveryCount > 0 ? leadDeliverySum / leadDeliveryCount : null;
-    const clvCacRatio = clvCacCount > 0 ? clvCacSum / clvCacCount : null;
-
-    // Customer margin data for chart
-    // Campaign ROI data for chart
-    const campaignRoiData = Array.from(campaigns.values())
-      .map((c) => {
-        const spend = c.spend || 0;
-        const profit = c.revenue - c.cost - spend;
-        const roi = spend > 0 ? (profit / spend) * 100 : null;
-        return {
-          name: c.campaign_name,
-          roi,
-          profit,
-          profitTrend: profit,
-        };
-      })
-      .filter((d) => d.roi !== null && Number.isFinite(d.roi) && d.roi > 0)
-      .sort((a, b) => b.profit - a.profit)
-      .slice(0, 5);
-
-    const segmentReliability = Array.from(segments.values())
-      .map((s) => ({
-        segment: s.segment,
-        onTimePct: s.onTimeCount > 0 ? s.onTimeSum * 100 / s.onTimeCount : null,
-        leadTime: s.leadTimeCount > 0 ? s.leadTimeSum / s.leadTimeCount : null,
-      }))
-      .filter((s) => s.onTimePct !== null && Number.isFinite(s.onTimePct))
-      .sort((a, b) => b.onTimePct - a.onTimePct);
-
-    // Adjust visual heights for mid/large segments to appear lower
-    const order = { small: 1, mid: 2, medium: 2, large: 3 };
-    const adjustedSegmentReliability = segmentReliability
-      .map((s) => {
-        let display = s.onTimePct;
-        const name = (s.segment || "").toLowerCase();
-        if (name.includes("mid")) {
-          display = Math.max(0, display - 10);
-        } else if (name.includes("large")) {
-          display = Math.max(0, display - 15);
-        }
-        return { ...s, displayOnTime: display };
-      })
-      .sort((a, b) => {
-        const aKey = (a.segment || "").toLowerCase();
-        const bKey = (b.segment || "").toLowerCase();
-        const aOrder = order[aKey] ?? 99;
-        const bOrder = order[bKey] ?? 99;
-        if (aOrder !== bOrder) return aOrder - bOrder;
-        return (a.segment || "").localeCompare(b.segment || "");
-      });
-
-    const fmtCurrency = (val) => {
-      if (typeof val !== "number" || !Number.isFinite(val)) return "—";
-      const abs = Math.abs(val);
-      if (abs >= 1_000_000_000) return `${(val / 1_000_000_000).toFixed(2)}B`;
-      if (abs >= 1_000_000) return `${(val / 1_000_000).toFixed(2)}M`;
-      return Math.round(val).toLocaleString();
+  // Build cascading options and filtered data
+  const { customerOptions, partOptions, supplierOptions, poLevelData, riskSummary } = useMemo(() => {
+    const norm = (v) => (v === null || v === undefined ? null : String(v).trim());
+    const eqi = (a, b) => {
+      if (a === null || a === undefined || b === null || b === undefined) return false;
+      return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
     };
-    const fmtPct = (val) =>
-      typeof val === "number" ? `${val.toFixed(1)}%` : "—";
-    const fmtDays = (val) =>
-      typeof val === "number" ? `${val.toFixed(1)} days` : "—";
-    const fmtRatio = (val) =>
-      typeof val === "number" ? `${val.toFixed(2)}×` : "—";
+
+    const customerOptions = Array.from(
+      new Set(rows.map((r) => norm(r.customer_name)).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+
+    const customerFiltered =
+      filters.customer === "All"
+        ? rows
+        : rows.filter((r) => eqi(r.customer_name, filters.customer));
+
+    const partOptions = Array.from(
+      new Set(customerFiltered.map((r) => norm(r.part_name)).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+
+    let supplierSource = customerFiltered;
+    if (filters.part !== "All") {
+      supplierSource = supplierSource.filter((r) => eqi(r.part_name, filters.part));
+    }
+    const supplierOptions = Array.from(
+      new Set(supplierSource.map((r) => norm(r.supplier_name)).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+
+    const { poLevelData, riskSummary } = transformRowsToPOLevel(rows, filters);
 
     return {
-      kpiCards: [
-        {
-          id: "profit",
-          label: "Customer True Profitability",
-          value: dataLoading || dataError ? "—" : fmtCurrency(customerProfit),
-          helper: "Revenue recognized minus total supply chain cost.",
-        },
-        {
-          id: "gm",
-          label: "Gross Margin %",
-          value: dataLoading || dataError ? "—" : fmtPct(grossMarginPct),
-          helper: "Profit as a percent of recognized revenue.",
-        },
-        {
-          id: "cycle",
-          label: "Lead-to-Inventory Ready",
-          value: dataLoading || dataError ? "—" : fmtDays(leadToDelivery),
-          helper: "Average days from first contact until inventory is available/shipped.",
-        },
-        {
-          id: "clv-cac",
-          label: "CLV : CAC Ratio",
-          value: dataLoading || dataError ? "—" : fmtRatio(clvCacRatio),
-          helper: "Average CLV divided by CAC across customers.",
-        },
-      ],
-      campaignRoiData,
-      fmtCurrency,
-      segmentReliability,
-      adjustedSegmentReliability,
+      customerOptions,
+      partOptions,
+      supplierOptions,
+      poLevelData,
+      riskSummary,
     };
-  }, [rows, dataLoading, dataError]);
+  }, [rows, filters]);
+
+  // Reset dependent filters if invalid
+  useEffect(() => {
+    if (filters.part !== "All" && !partOptions.includes(filters.part)) {
+      setFilters((prev) => ({ ...prev, part: "All", supplier: "All" }));
+    }
+  }, [partOptions, filters.part]);
+
+  useEffect(() => {
+    if (filters.supplier !== "All" && !supplierOptions.includes(filters.supplier)) {
+      setFilters((prev) => ({ ...prev, supplier: "All" }));
+    }
+  }, [supplierOptions, filters.supplier]);
 
   return (
     <section className="max-w-7xl mx-auto mt-10 pt-2 pb-16 min-h-screen">
-      <div className="rounded-3xl border border-emerald-500/30 bg-black/20 px-5 py-6 shadow-emerald-900/40 shadow-2xl backdrop-blur-md md:px-8 md:py-8">
+      <div className="rounded-3xl border border-emerald-500/40 bg-gradient-to-b from-emerald-900 via-emerald-800 to-emerald-900 px-5 py-6 shadow-emerald-900/40 shadow-2xl md:px-8 md:py-8">
         <div className="flex items-center justify-between gap-4">
           <button
             onClick={onBack}
@@ -410,201 +265,154 @@ function IntegratedDashboard({ onBack }) {
           </p>
         )}
 
-        <div className="mt-8 grid gap-6 grid-cols-1 md:grid-cols-2">
-          {kpiCards.map((kpi, index) => (
-            <div
-              key={kpi.id}
-              className="bg-[#0b1210]/70 border border-emerald-500/40 rounded-2xl p-5 shadow-lg backdrop-blur-sm
-                         flex flex-col justify-between
-                         hover:border-emerald-300 hover:shadow-emerald-400/30 transition-all duration-300
-                         hover:-translate-y-1"
-              style={{
-                animation: "fadeInUp 0.9s ease-out forwards",
-                animationDelay: `${0.15 * (index + 1)}s`,
-              }}
+        {/* Filters */}
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
+          <div className="flex flex-col">
+            <label className="text-xs text-emerald-100/80 mb-1">Customer</label>
+            <select
+              value={filters.customer}
+              onChange={(e) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  customer: e.target.value,
+                  part: "All",
+                  supplier: "All",
+                }))
+              }
+              className="bg-[#050908]/70 border border-emerald-500/40 rounded-xl px-3 py-2 text-sm text-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-400/60"
             >
-              <p className="text-xs uppercase tracking-wide text-emerald-200/80">
-                {kpi.label}
+              <option value="All">All</option>
+              {customerOptions.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col">
+            <label className="text-xs text-emerald-100/80 mb-1">Part</label>
+            <select
+              value={filters.part}
+              onChange={(e) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  part: e.target.value,
+                  supplier: "All",
+                }))
+              }
+              className="bg-[#050908]/70 border border-emerald-500/40 rounded-xl px-3 py-2 text-sm text-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-400/60"
+            >
+              <option value="All">All</option>
+              {partOptions.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col">
+            <label className="text-xs text-emerald-100/80 mb-1">Supplier</label>
+            <select
+              value={filters.supplier}
+              onChange={(e) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  supplier: e.target.value,
+                }))
+              }
+              className="bg-[#050908]/70 border border-emerald-500/40 rounded-xl px-3 py-2 text-sm text-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-400/60"
+            >
+              <option value="All">All</option>
+              {supplierOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Risk card */}
+        <div className="mt-8 bg-[#0b1210]/70 border border-emerald-500/40 rounded-2xl p-6 shadow-lg backdrop-blur-sm">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-white">Risk Summary</h3>
+              <p className="mt-1 text-xs text-emerald-100/70">
+                Uses risk_score and risk_level directly from the SQL view.
               </p>
-              <p className="mt-3 text-2xl font-semibold text-white">{kpi.value}</p>
-              <p className="mt-3 text-xs text-emerald-100/70">{kpi.helper}</p>
             </div>
-          ))}
+            <div className="text-right">
+              <div className="text-xs uppercase tracking-wide text-emerald-200/80">Risk Level</div>
+              <div className="text-2xl font-bold text-white mt-1">
+                {riskSummary.riskLevel || "No Data"}
+              </div>
+              <div className="text-xs text-emerald-100/70">
+                Score: {riskSummary.riskScore !== null && riskSummary.riskScore !== undefined ? riskSummary.riskScore : "—"}
+              </div>
+            </div>
+          </div>
         </div>
 
-
-        <div className="mt-8 grid gap-6 grid-cols-1 md:grid-cols-2">
-          {/* Campaign Profit Bar Chart */}
-          <div className="bg-[#0b1210]/70 border border-emerald-500/40 rounded-2xl p-6 shadow-lg backdrop-blur-sm">
-            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-          <div>
-            <h3 className="text-sm font-semibold text-white">Campaign Profit by Type (2020–2025)</h3>
-            <p className="mt-1 text-xs text-emerald-100/70">
-              Profit after supply-chain cost and campaign spend across 2020–2025; hover to see ROI%.
-            </p>
-              </div>
+        {/* Multi-line trend chart */}
+        <div className="mt-8 bg-[#0b1210]/70 border border-emerald-500/40 rounded-2xl p-6 shadow-lg backdrop-blur-sm">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-white">Process Trend by PO</h3>
+              <p className="mt-1 text-xs text-emerald-100/70">
+                PO-level lines for cost, lead time, defects, and OEE (values from SQL).
+              </p>
             </div>
-            {dataLoading ? (
-              <div className="text-xs text-emerald-100/70">Loading…</div>
-            ) : dataError ? (
-              <div className="text-xs text-red-200">Unable to load campaign profit.</div>
-            ) : !campaignRoiData?.length ? (
-              <div className="text-xs text-emerald-100/70">No campaign profit data available.</div>
-            ) : (
-              <div className="w-full" style={{ height: 340 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={campaignRoiData}
-                    margin={{ top: 10, right: 20, left: 10, bottom: 60 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(16,185,129,0.18)" />
-                    <XAxis
-                      dataKey="name"
-                      tick={{ fontSize: 10, fill: "#A7F3D0" }}
-                      angle={-25}
-                      textAnchor="end"
-                      interval={0}
-                      height={60}
-                    />
-                    <YAxis
-                      tickFormatter={(v) => fmtCurrency(v)}
-                      tick={{ fontSize: 11, fill: "#A7F3D0" }}
-                    />
-                    <Tooltip
-                      cursor={{ fill: "rgba(16,185,129,0.08)" }}
-                      contentStyle={{
-                        backgroundColor: "#022c22",
-                        border: "1px solid rgba(16,185,129,0.4)",
-                        borderRadius: "0.75rem",
-                        fontSize: "11px",
-                        color: "#ECFDF5",
-                      }}
-                      formatter={(value, name, props) => {
-                        if (props?.dataKey === "profitTrend") {
-                          return null; // hide line series in tooltip
-                        }
-                        if (name === "profit") {
-                          return [fmtCurrency(value), "Profit After Cost & Spend"];
-                        }
-                        return [value, name];
-                      }}
-                      filterNull
-                    />
-                    <Legend
-                      wrapperStyle={{ fontSize: 11, color: "#A7F3D0" }}
-                      formatter={(val) => (val === "profit" ? "Profit" : val)}
-                    />
-                    <Bar
-                      dataKey="profit"
-                      radius={[4, 4, 0, 0]}
-                      fill="#f59e0b"
-                      shape={(props) => {
-                        const { x, y, width, height, payload } = props;
-                        const color = payload.profit < 0 ? "#ef4444" : "#f59e0b";
-                        return <rect x={x} y={y} width={width} height={height} fill={color} />;
-                      }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="profitTrend"
-                      name="Trend"
-                      stroke="#22d3ee"
-                      strokeWidth={2}
-                      dot={{ r: 3, stroke: "#22d3ee", fill: "#0f172a" }}
-                      activeDot={{ r: 5, fill: "#22d3ee" }}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+          </div>
+
+          {dataLoading ? (
+            <div className="text-xs text-emerald-100/70">Loading…</div>
+          ) : dataError ? (
+            <div className="text-xs text-red-200">Failed to load data: {dataError}</div>
+          ) : !poLevelData.length ? (
+            <div className="text-xs text-emerald-100/70">No data for this selection.</div>
+          ) : (
+            <div className="w-full" style={{ height: 340 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={poLevelData} margin={{ top: 10, right: 20, left: 10, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(16,185,129,0.18)" />
+                  <XAxis
+                    dataKey="po_creation_date"
+                    tick={{ fontSize: 11, fill: "#A7F3D0" }}
+                    angle={-20}
+                    height={50}
+                  />
+                  <YAxis tick={{ fontSize: 11, fill: "#A7F3D0" }} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#022c22",
+                      border: "1px solid rgba(16,185,129,0.4)",
+                      borderRadius: "0.75rem",
+                      fontSize: "11px",
+                      color: "#ECFDF5",
+                    }}
+                    formatter={(value, name) => {
+                      if (value === null || value === undefined || Number.isNaN(value)) return "—";
+                      if (name === "oee_pct") return [`${Number(value).toFixed(1)}%`, "OEE %"];
+                      return [Number(value).toFixed(1), name];
+                    }}
+                    labelFormatter={(label, payload) => {
+                      const po = payload && payload.length ? payload[0].payload.po_number : "";
+                      return `${label || "Unknown"} • PO ${po}`;
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, color: "#ECFDF5" }} />
+                  <Line type="monotone" dataKey="total_cost" name="Total Cost" stroke="#22d3ee" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="lead_time_days" name="Lead Time (days)" stroke="#a855f7" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="defect_quantity" name="Defect Qty" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="oee_pct" name="OEE %" stroke="#4ade80" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </div>
 
-        {/* Customer Delivery Reliability Matrix (Grouped Bar) */}
-          <div className="bg-[#0b1210]/70 border border-emerald-500/40 rounded-2xl p-6 shadow-lg backdrop-blur-sm">
-            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-              <div>
-                <h3 className="text-sm font-semibold text-white">Customer Delivery Reliability</h3>
-                <p className="mt-1 text-xs text-emerald-100/70">
-                  On-time delivery % by customer segment (size/industry) with lead time context.
-                </p>
-              </div>
-            </div>
-            {dataLoading ? (
-              <div className="text-xs text-emerald-100/70">Loading…</div>
-            ) : dataError ? (
-              <div className="text-xs text-red-200">Unable to load delivery reliability.</div>
-            ) : !segmentReliability?.length ? (
-              <div className="text-xs text-emerald-100/70">No delivery reliability data available.</div>
-            ) : (
-              <div className="w-full" style={{ height: 340 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={adjustedSegmentReliability}
-                    margin={{ top: 10, right: 20, left: 10, bottom: 60 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(16,185,129,0.18)" />
-                    <XAxis
-                      dataKey="segment"
-                      tick={{ fontSize: 10, fill: "#A7F3D0" }}
-                      angle={-20}
-                      textAnchor="end"
-                      interval={0}
-                      height={60}
-                    />
-                    <YAxis
-                      tickFormatter={(v) => `${v.toFixed(1)}%`}
-                      tick={{ fontSize: 11, fill: "#A7F3D0" }}
-                    />
-                    <Tooltip
-                      cursor={{ fill: "rgba(16,185,129,0.08)" }}
-                      contentStyle={{
-                        backgroundColor: "#022c22",
-                        border: "1px solid rgba(16,185,129,0.4)",
-                        borderRadius: "0.75rem",
-                        fontSize: "11px",
-                        color: "#ECFDF5",
-                      }}
-                      formatter={(value, name, props) => {
-                        if (name === "displayOnTime") {
-                          // Show both display and actual in tooltip
-                          const actual = props?.payload?.onTimePct;
-                          return [
-                            `${value.toFixed(1)}%` +
-                              (Number.isFinite(actual)
-                                ? ` (actual ${actual.toFixed(1)}%)`
-                                : ""),
-                            "On-Time %",
-                          ];
-                        }
-                        if (name === "leadTime") return [`${value.toFixed(1)} days`, "Avg Lead Time"];
-                        return [value, name];
-                      }}
-                    />
-                    <Legend
-                      wrapperStyle={{ fontSize: 11, color: "#A7F3D0" }}
-                      formatter={(val) => (val === "displayOnTime" ? "On-Time %" : "Avg Lead Time")}
-                    />
-                    <Bar
-                      dataKey="displayOnTime"
-                      radius={[4, 4, 0, 0]}
-                      fill="#34d399"
-                      shape={(props) => {
-                        const { x, y, width, height, payload } = props;
-                        // Color adjust by lead time: greener for shorter, more teal for longer
-                        const lt = payload.leadTime ?? 0;
-                        const clamped = Math.max(0, Math.min(60, lt)); // clamp 0-60 days
-                        const green = 210 - clamped * 2; // reduce green as lead time increases
-                        const color = `rgba(52, ${green}, 153, 1)`;
-                        return <rect x={x} y={y} width={width} height={height} fill={color} />;
-                      }}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-          )}
-        </div>
-
-        </div>
       </div>
     </section>
   );
