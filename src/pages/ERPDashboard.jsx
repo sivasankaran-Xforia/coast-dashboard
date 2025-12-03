@@ -534,10 +534,10 @@ function ERPDashboard({ onBack }) {
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
             <div>
               <h3 className="text-sm font-semibold text-white">
-                Supplier Quality vs Production Yield
+                Vendor Quality vs Production Yield
               </h3>
               <p className="mt-1 text-xs text-emerald-100/70">
-                Each bubble is a supplier (avg rating vs avg yield); bubble size shows total spend.
+                See how each vendor scores on quality and yield; bubble size shows total spend.
               </p>
             </div>
           </div>
@@ -596,13 +596,15 @@ function ERPDashboard({ onBack }) {
                   <Tooltip
                     cursor={{ stroke: "rgba(16,185,129,0.4)", strokeWidth: 1 }}
                     contentStyle={{
-                      backgroundColor: "#022c22",
-                      border: "1px solid rgba(16,185,129,0.4)",
+                      backgroundColor: "#062b24",
+                      border: "1px solid rgba(16,185,129,0.5)",
                       borderRadius: "0.75rem",
                       fontSize: "11px",
                       color: "#ECFDF5",
                     }}
-                    formatter={(value, name, props) => {
+                    labelStyle={{ color: "#ECFDF5" }}
+                    itemStyle={{ color: "#ECFDF5" }}
+                    formatter={(value, name) => {
                       if (name === "avgRating") return [value.toFixed(2), "Avg Rating"];
                       if (name === "avgYield") return [`${value.toFixed(1)}%`, "Avg Yield"];
                       if (name === "totalSpend")
