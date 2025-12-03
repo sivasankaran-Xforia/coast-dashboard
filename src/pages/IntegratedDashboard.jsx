@@ -301,10 +301,10 @@ function IntegratedDashboard({ onBack }) {
             CRM &amp; ERP Integration
           </p>
           <h2 className="mt-3 text-2xl md:text-3xl font-bold text-white tracking-tight">
-            Cross-System Profit &amp; Cycle KPIs
+            Cross-System Cost, Cycle &amp; Quality KPIs
           </h2>
           <p className="mt-2 text-sm text-emerald-100/80 max-w-2xl">
-            Unified profitability, margin, lead-to-delivery cycle, and CLV:CAC ratio calculated across CRM and ERP.
+            Track PO-level cost, lead time, defects, OEE, and risk with synchronized customer, part, and supplier filters.
           </p>
         </div>
 
@@ -388,7 +388,7 @@ function IntegratedDashboard({ onBack }) {
             <div>
               <h3 className="text-sm font-semibold text-white">Risk Summary</h3>
               <p className="mt-1 text-xs text-emerald-100/70">
-                Uses risk_score and risk_level directly from the SQL view.
+                Uses risk_score and risk_level provided by the integrated data.
               </p>
             </div>
             <div className="text-right">
@@ -409,7 +409,7 @@ function IntegratedDashboard({ onBack }) {
             <div>
               <h3 className="text-sm font-semibold text-white">Process Trend by PO</h3>
               <p className="mt-1 text-xs text-emerald-100/70">
-                PO-level lines for cost, lead time, defects, and OEE (values from SQL).
+                PO-level lines for cost, lead time, defects, and OEE.
               </p>
             </div>
           </div>
