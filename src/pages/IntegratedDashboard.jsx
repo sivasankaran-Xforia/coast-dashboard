@@ -19,7 +19,7 @@ export function transformRowsToPOLevel(rows, filters) {
   };
 
   const filtered = rows.filter((r) => {
-    if (filters.customer !== "All" && !eqi(r.customer_name, filters.customer)) return false;
+    if (filters.customer && !eqi(r.customer_name, filters.customer)) return false;
     if (filters.part !== "All" && !eqi(r.part_name, filters.part)) return false;
     if (filters.supplier !== "All" && !eqi(r.supplier_name, filters.supplier)) return false;
     return true;
@@ -92,6 +92,13 @@ export function transformRowsToPOLevel(rows, filters) {
       risk_score: g.risk_score,
       risk_level: g.risk_level,
     }))
+    // Exclude future/irrelevant year 2026+ from the chart (based on po_creation_date)
+    .filter((g) => {
+      if (!g.po_creation_date) return true;
+      const d = new Date(g.po_creation_date);
+      if (Number.isNaN(d.getTime())) return true;
+      return d.getFullYear() <= 2025;
+    })
     .sort((a, b) => {
       const da = a.po_creation_date ? new Date(a.po_creation_date).getTime() : Infinity;
       const db = b.po_creation_date ? new Date(b.po_creation_date).getTime() : Infinity;
@@ -120,8 +127,9 @@ function IntegratedDashboard({ onBack }) {
   const [rows, setRows] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState(null);
+  // Force a customer selection to avoid loading every PO; will auto-populate after fetch
   const [filters, setFilters] = useState({
-    customer: "All",
+    customer: "",
     part: "All",
     supplier: "All",
   });
@@ -187,7 +195,7 @@ function IntegratedDashboard({ onBack }) {
     ).sort((a, b) => a.localeCompare(b));
 
     const customerFiltered =
-      filters.customer === "All"
+      !filters.customer
         ? rows
         : rows.filter((r) => eqi(r.customer_name, filters.customer));
 
@@ -213,6 +221,18 @@ function IntegratedDashboard({ onBack }) {
       riskSummary,
     };
   }, [rows, filters]);
+
+  // Auto-select first customer option once available
+  useEffect(() => {
+    if (!filters.customer && customerOptions.length > 0) {
+      setFilters((prev) => ({
+        ...prev,
+        customer: customerOptions[0],
+        part: "All",
+        supplier: "All",
+      }));
+    }
+  }, [customerOptions, filters.customer]);
 
   // Reset dependent filters if invalid
   useEffect(() => {
@@ -281,7 +301,6 @@ function IntegratedDashboard({ onBack }) {
               }
               className="bg-[#050908]/70 border border-emerald-500/40 rounded-xl px-3 py-2 text-sm text-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-400/60"
             >
-              <option value="All">All</option>
               {customerOptions.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -375,7 +394,14 @@ function IntegratedDashboard({ onBack }) {
           ) : (
             <div className="w-full" style={{ height: 340 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={poLevelData} margin={{ top: 10, right: 20, left: 10, bottom: 40 }}>
+                <LineChart
+                  data={poLevelData.filter((p) => {
+                    if (!p.po_creation_date) return true;
+                    const d = new Date(p.po_creation_date);
+                    return !Number.isNaN(d.getTime()) ? d.getFullYear() <= 2025 : true;
+                  })}
+                  margin={{ top: 10, right: 20, left: 10, bottom: 40 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(16,185,129,0.18)" />
                   <XAxis
                     dataKey="po_creation_date"
