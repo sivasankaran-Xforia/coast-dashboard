@@ -20,21 +20,11 @@ const extractYear = (value) => {
   return match ? Number(match[1]) : null;
 };
 
-// Shared transformer: filters rows, groups by PO, returns chart-ready data and risk summary
-export function transformRowsToPOLevel(rows, filters) {
-  const eqi = (a, b) => {
-    if (a === null || a === undefined || b === null || b === undefined) return false;
-    return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
-  };
-
-  const filtered = rows.filter((r) => {
-    // Hard stop: exclude any PO outside desired window (>2025)
+// Shared transformer: group already-filtered rows by PO and return chart-ready data + risk summary
+export function transformRowsToPOLevel(filteredRows) {
+  const filtered = filteredRows.filter((r) => {
     const yr = extractYear(r.po_creation_date);
     if (yr !== null && yr > 2025) return false;
-
-    if (filters.customer && !eqi(r.customer_name, filters.customer)) return false;
-    if (filters.part !== "All" && !eqi(r.part_name, filters.part)) return false;
-    if (filters.supplier !== "All" && !eqi(r.supplier_name, filters.supplier)) return false;
     return true;
   });
 
@@ -135,6 +125,63 @@ export function transformRowsToPOLevel(rows, filters) {
   return { poLevelData, riskSummary: { riskScore, riskLevel } };
 }
 
+// Risk summarizer based on distribution, not max-only
+export function summarizeRisk(poLines) {
+  if (!poLines || poLines.length === 0) {
+    return {
+      n_pos: 0,
+      safe_count: 0,
+      medium_count: 0,
+      high_count: 0,
+      high_pct: 0,
+      avg_risk_score: null,
+      overall_level: "No Data",
+    };
+  }
+
+  const n_pos = poLines.length;
+  let safe = 0;
+  let med = 0;
+  let high = 0;
+  let scoreSum = 0;
+  let scoreCount = 0;
+
+  poLines.forEach((p) => {
+    if (p.risk_level === "Safe") safe += 1;
+    else if (p.risk_level === "Medium Risk") med += 1;
+    else if (p.risk_level === "High Risk") high += 1;
+
+    if (p.risk_score !== null && p.risk_score !== undefined && !Number.isNaN(p.risk_score)) {
+      scoreSum += Number(p.risk_score);
+      scoreCount += 1;
+    }
+  });
+
+  const high_pct = n_pos > 0 ? high / n_pos : 0;
+  const avg_risk_score = scoreCount > 0 ? scoreSum / scoreCount : null;
+
+  let overall_level = "Need More Data";
+  if (n_pos < 3) {
+    overall_level = "Need More Data";
+  } else if (high_pct >= 0.5 && (avg_risk_score ?? 0) >= 10) {
+    overall_level = "High Risk";
+  } else if (high_pct >= 0.2 || (avg_risk_score ?? 0) >= 6) {
+    overall_level = "Medium Risk";
+  } else {
+    overall_level = "Safe";
+  }
+
+  return {
+    n_pos,
+    safe_count: safe,
+    medium_count: med,
+    high_count: high,
+    high_pct,
+    avg_risk_score,
+    overall_level,
+  };
+}
+
 function IntegratedDashboard({ onBack }) {
   const [rows, setRows] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
@@ -223,7 +270,16 @@ function IntegratedDashboard({ onBack }) {
       new Set(supplierSource.map((r) => norm(r.supplier_name)).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
 
-    const { poLevelData, riskSummary } = transformRowsToPOLevel(rows, filters);
+    // Apply filters: customer required, part/supplier optional ("All")
+    const filteredRows = rows.filter((r) => {
+      if (!filters.customer) return false;
+      if (!eqi(r.customer_name, filters.customer)) return false;
+      if (filters.part !== "All" && !eqi(r.part_name, filters.part)) return false;
+      if (filters.supplier !== "All" && !eqi(r.supplier_name, filters.supplier)) return false;
+      return true;
+    });
+
+    const { poLevelData, riskSummary } = transformRowsToPOLevel(filteredRows);
 
     return {
       customerOptions,
@@ -252,6 +308,15 @@ function IntegratedDashboard({ onBack }) {
         supplier: "All",
       }));
     }
+    // If current customer is no longer available, fall back to first option
+    if (filters.customer && customerOptions.length > 0 && !customerOptions.includes(filters.customer)) {
+      setFilters((prev) => ({
+        ...prev,
+        customer: customerOptions[0],
+        part: "All",
+        supplier: "All",
+      }));
+    }
   }, [customerOptions, filters.customer]);
 
   const riskColor =
@@ -262,6 +327,9 @@ function IntegratedDashboard({ onBack }) {
       : riskSummary.riskLevel === "Safe"
       ? "text-emerald-300"
       : "text-emerald-100";
+
+  const canShowRisk = Boolean(filters.customer) && filters.part !== "All" && filters.supplier !== "All";
+  const distribution = useMemo(() => (canShowRisk ? summarizeRisk(poLevelData) : null), [canShowRisk, poLevelData]);
 
   // Reset dependent filters if invalid
   useEffect(() => {
@@ -361,7 +429,7 @@ function IntegratedDashboard({ onBack }) {
           </div>
 
           <div className="flex flex-col">
-            <label className="text-xs text-emerald-100/80 mb-1">Supplier</label>
+            <label className="text-xs text-emerald-100/80 mb-1">Vendor</label>
             <select
               value={filters.supplier}
               onChange={(e) =>
@@ -388,19 +456,47 @@ function IntegratedDashboard({ onBack }) {
             <div>
               <h3 className="text-sm font-semibold text-white">Risk Summary</h3>
               <p className="mt-1 text-xs text-emerald-100/70">
-                Uses risk_score and risk_level provided by the integrated data.
+                Based on risk_score and risk_level provided by the integrated data.
               </p>
             </div>
-            <div className="text-right">
-              <div className="text-xs uppercase tracking-wide text-emerald-200/80">Risk Level</div>
-              <div className={`text-2xl font-bold mt-1 ${riskColor}`}>
-                {riskSummary.riskLevel || "No Data"}
+          </div>
+          {!canShowRisk ? (
+            <div className="text-xs text-emerald-100/70 mt-2">
+              Select customer, part, and vendor to see risk.
+            </div>
+          ) : !distribution ? (
+            <div className="text-xs text-emerald-100/70 mt-2">No data for this selection.</div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-4 mt-4 text-sm text-emerald-50">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-emerald-200/70">Overall</div>
+                <div className={`text-xl font-bold ${riskColor}`}>
+                  {distribution.overall_level}
+                </div>
+                <div className="text-xs text-emerald-100/70">
+                  Avg score: {distribution.avg_risk_score !== null ? distribution.avg_risk_score.toFixed(1) : "—"}
+                </div>
               </div>
-              <div className="text-xs text-emerald-100/70">
-                Score: {riskSummary.riskScore !== null && riskSummary.riskScore !== undefined ? riskSummary.riskScore : "—"}
+              <div>
+                <div className="text-xs uppercase tracking-wide text-emerald-200/70">Safe</div>
+                <div className="text-lg font-semibold text-emerald-200">
+                  {distribution.safe_count}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wide text-emerald-200/70">Medium</div>
+                <div className="text-lg font-semibold text-yellow-300">
+                  {distribution.medium_count}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wide text-emerald-200/70">High</div>
+                <div className="text-lg font-semibold text-red-300">
+                  {distribution.high_count} ({(distribution.high_pct * 100).toFixed(1)}%)
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Multi-line trend chart */}
