@@ -368,7 +368,7 @@ function ERPDashboard({ onBack }) {
             : costPerGood === null
             ? "—"
             : `$ ${Number(costPerGood).toLocaleString()}`,
-        helper: "Total cost incl. scrap divided by good pieces.",
+        helper: "How much did we spend for each good unit produced.",
       },
       {
         id: "cycle",
@@ -390,7 +390,7 @@ function ERPDashboard({ onBack }) {
             : utilization === null
             ? "—"
             : `${utilization}%`,
-        helper: "Produced vs received quantity.",
+        helper: "How efficiently did we turn received material into finished pieces.",
       },
     ];
 
