@@ -11,6 +11,15 @@ import {
   Legend,
 } from "recharts";
 
+// Robust year extractor for date strings; falls back to regex if Date parsing fails
+const extractYear = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (!Number.isNaN(d.getTime())) return d.getFullYear();
+  const match = String(value).match(/(\d{4})/);
+  return match ? Number(match[1]) : null;
+};
+
 // Shared transformer: filters rows, groups by PO, returns chart-ready data and risk summary
 export function transformRowsToPOLevel(rows, filters) {
   const eqi = (a, b) => {
@@ -19,6 +28,10 @@ export function transformRowsToPOLevel(rows, filters) {
   };
 
   const filtered = rows.filter((r) => {
+    // Hard stop: exclude any PO outside desired window (>2025)
+    const yr = extractYear(r.po_creation_date);
+    if (yr !== null && yr > 2025) return false;
+
     if (filters.customer && !eqi(r.customer_name, filters.customer)) return false;
     if (filters.part !== "All" && !eqi(r.part_name, filters.part)) return false;
     if (filters.supplier !== "All" && !eqi(r.supplier_name, filters.supplier)) return false;
@@ -94,10 +107,9 @@ export function transformRowsToPOLevel(rows, filters) {
     }))
     // Exclude future/irrelevant year 2026+ from the chart (based on po_creation_date)
     .filter((g) => {
-      if (!g.po_creation_date) return true;
-      const d = new Date(g.po_creation_date);
-      if (Number.isNaN(d.getTime())) return true;
-      return d.getFullYear() <= 2025;
+      const yr = extractYear(g.po_creation_date);
+      if (yr === null) return true;
+      return yr <= 2025;
     })
     .sort((a, b) => {
       const da = a.po_creation_date ? new Date(a.po_creation_date).getTime() : Infinity;
@@ -222,6 +234,14 @@ function IntegratedDashboard({ onBack }) {
     };
   }, [rows, filters]);
 
+  // Final chart dataset: keep only rows with a valid year <= 2025
+  const chartData = useMemo(() => {
+    return poLevelData.filter((p) => {
+      const yr = extractYear(p.po_creation_date);
+      return yr !== null && yr <= 2025;
+    });
+  }, [poLevelData]);
+
   // Auto-select first customer option once available
   useEffect(() => {
     if (!filters.customer && customerOptions.length > 0) {
@@ -233,6 +253,15 @@ function IntegratedDashboard({ onBack }) {
       }));
     }
   }, [customerOptions, filters.customer]);
+
+  const riskColor =
+    riskSummary.riskLevel === "High Risk"
+      ? "text-red-300"
+      : riskSummary.riskLevel === "Medium Risk"
+      ? "text-yellow-300"
+      : riskSummary.riskLevel === "Safe"
+      ? "text-emerald-300"
+      : "text-emerald-100";
 
   // Reset dependent filters if invalid
   useEffect(() => {
@@ -364,7 +393,7 @@ function IntegratedDashboard({ onBack }) {
             </div>
             <div className="text-right">
               <div className="text-xs uppercase tracking-wide text-emerald-200/80">Risk Level</div>
-              <div className="text-2xl font-bold text-white mt-1">
+              <div className={`text-2xl font-bold mt-1 ${riskColor}`}>
                 {riskSummary.riskLevel || "No Data"}
               </div>
               <div className="text-xs text-emerald-100/70">
@@ -389,17 +418,13 @@ function IntegratedDashboard({ onBack }) {
             <div className="text-xs text-emerald-100/70">Loading…</div>
           ) : dataError ? (
             <div className="text-xs text-red-200">Failed to load data: {dataError}</div>
-          ) : !poLevelData.length ? (
+          ) : !chartData.length ? (
             <div className="text-xs text-emerald-100/70">No data for this selection.</div>
           ) : (
             <div className="w-full" style={{ height: 340 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart
-                  data={poLevelData.filter((p) => {
-                    if (!p.po_creation_date) return true;
-                    const d = new Date(p.po_creation_date);
-                    return !Number.isNaN(d.getTime()) ? d.getFullYear() <= 2025 : true;
-                  })}
+                  data={chartData}
                   margin={{ top: 10, right: 20, left: 10, bottom: 40 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(16,185,129,0.18)" />
