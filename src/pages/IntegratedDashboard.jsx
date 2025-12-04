@@ -644,6 +644,7 @@ function IntegratedDashboard({ onBack }) {
     customer: "",
     part: "All",
     supplier: "All",
+    year: "All",
   });
   useEffect(() => {
     const loadData = async () => {
@@ -705,6 +706,7 @@ function IntegratedDashboard({ onBack }) {
     customerOptions,
     partOptions,
     supplierOptions,
+    yearOptions,
     poLevelData,
     riskSummary,
     bubbleNodes,
@@ -727,13 +729,29 @@ function IntegratedDashboard({ onBack }) {
         supplierSource.map((r) => norm(r.supplier_name)).filter(Boolean)
       )
     ).sort((a, b) => a.localeCompare(b));
-    // Apply filters: customer required, part/supplier optional ("All")
+    
+    // Extract available years from po_creation_date
+    const years = Array.from(
+      new Set(
+        rows
+          .map((r) => extractYear(r.po_creation_date))
+          .filter((yr) => yr !== null && yr <= 2025)
+      )
+    ).sort((a, b) => b - a); // Sort descending (newest first)
+    const yearOptions = years.map((yr) => String(yr));
+    
+    // Apply filters: customer required, part/supplier/year optional ("All")
     const filteredRows = rows.filter((r) => {
       if (!filters.customer) return false;
       if (!eqi(r.customer_name, filters.customer)) return false;
       if (filters.part !== "All" && !eqi(r.part_name, filters.part)) return false;
       if (filters.supplier !== "All" && !eqi(r.supplier_name, filters.supplier))
         return false;
+      // Apply year filter
+      if (filters.year !== "All") {
+        const rowYear = extractYear(r.po_creation_date);
+        if (rowYear === null || String(rowYear) !== filters.year) return false;
+      }
       return true;
     });
     const { poLevelData, riskSummary } = transformRowsToPOLevel(filteredRows);
@@ -742,6 +760,7 @@ function IntegratedDashboard({ onBack }) {
       customerOptions,
       partOptions,
       supplierOptions,
+      yearOptions,
       poLevelData,
       riskSummary,
       bubbleNodes,
@@ -821,6 +840,7 @@ function IntegratedDashboard({ onBack }) {
         customer: customerOptions[0],
         part: "All",
         supplier: "All",
+        year: "All",
       }));
     }
     // If current customer is no longer available, fall back to first option
@@ -834,6 +854,7 @@ function IntegratedDashboard({ onBack }) {
         customer: customerOptions[0],
         part: "All",
         supplier: "All",
+        year: "All",
       }));
     }
   }, [customerOptions, filters.customer]);
@@ -900,7 +921,7 @@ function IntegratedDashboard({ onBack }) {
           </p>
         )}
         {/* Filters */}
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="mt-6 grid gap-4 md:grid-cols-4">
           <div className="flex flex-col">
             <label className="text-xs text-emerald-100/80 mb-1">Customer</label>
             <select
@@ -959,6 +980,26 @@ function IntegratedDashboard({ onBack }) {
               {supplierOptions.map((s) => (
                 <option key={s} value={s}>
                   {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs text-emerald-100/80 mb-1">Year</label>
+            <select
+              value={filters.year}
+              onChange={(e) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  year: e.target.value,
+                }))
+              }
+              className="bg-[#050908]/70 border border-emerald-500/40 rounded-xl px-3 py-2 text-sm text-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-400/60"
+            >
+              <option value="All">All</option>
+              {yearOptions.map((y) => (
+                <option key={y} value={y}>
+                  {y}
                 </option>
               ))}
             </select>
