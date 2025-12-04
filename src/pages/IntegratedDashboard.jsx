@@ -583,8 +583,8 @@ function BubbleSupplyMap({ nodes, filters }) {
                   <Geography
                     key={geo.rsmKey}
                     geography={geo}
-                    fill="#022c22"
-                    stroke="#064e3b"
+                    fill="#065f46"
+                    stroke="#047857"
                     strokeWidth={0.4}
                   />
                 ))

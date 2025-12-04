@@ -424,8 +424,7 @@ function ERPDashboard({ onBack }) {
           </button>
 
           <div className="text-xs text-emerald-100/70">
-            Home / ERP Analytics /{" "}
-            <span className="text-emerald-50">Procurement &amp; Production</span>
+            Home / ERP Analytics
           </div>
         </div>
 

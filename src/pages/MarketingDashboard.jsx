@@ -520,10 +520,7 @@ function MarketingDashboard({ onBack }) {
 
           {/* Simple breadcrumb text */}
           <div className="text-xs text-emerald-100/70">
-            Home / CRM Analytics /{" "}
-            <span className="text-emerald-50">
-              Marketing &amp; Campaign Effectiveness
-            </span>
+            Home / CRM Analytics
           </div>
         </div>
 
