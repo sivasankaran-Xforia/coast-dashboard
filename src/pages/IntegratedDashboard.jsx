@@ -10,7 +10,6 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
-
 import {
   ComposableMap,
   Geographies,
@@ -18,11 +17,9 @@ import {
    Marker,
   ZoomableGroup,
 } from "react-simple-maps";
-
 /* ===========================
    Helpers
    =========================== */
-
 // Robust year extractor for date strings; falls back to regex if Date parsing fails
 const extractYear = (value) => {
   if (!value) return null;
@@ -31,18 +28,14 @@ const extractYear = (value) => {
   const match = String(value).match(/(\d{4})/);
   return match ? Number(match[1]) : null;
 };
-
 const norm = (v) => (v === null || v === undefined ? null : String(v).trim());
-
 const eqi = (a, b) => {
   if (a === null || a === undefined || b === null || b === undefined) return false;
   return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 };
-
 /* ===========================
    PO-level transformer
    =========================== */
-
 // Shared transformer: group already-filtered rows by PO and return chart-ready data + risk summary
 export function transformRowsToPOLevel(filteredRows) {
   const filtered = filteredRows.filter((r) => {
@@ -50,9 +43,7 @@ export function transformRowsToPOLevel(filteredRows) {
     if (yr !== null && yr > 2025) return false;
     return true;
   });
-
   const groups = new Map();
-
   filtered.forEach((r, idx) => {
     const key = r.po_number || `po-${idx}`;
     if (!groups.has(key)) {
@@ -75,31 +66,24 @@ export function transformRowsToPOLevel(filteredRows) {
       });
     }
     const g = groups.get(key);
-
     const cost = Number(r.total_cost);
     if (!Number.isNaN(cost)) g.total_cost += cost;
-
     const ltd = Number(r.lead_time_days);
     if (!Number.isNaN(ltd)) {
       g.lead_time_days_sum += ltd;
       g.lead_time_days_count += 1;
     }
-
     const defect = Number(r.defect_quantity);
     if (!Number.isNaN(defect)) g.defect_quantity += defect;
-
     const produced = Number(r.produced_quantity);
     if (!Number.isNaN(produced)) g.produced_quantity += produced;
-
     const good = Number(r.good_pieces);
     if (!Number.isNaN(good)) g.good_pieces += good;
-
     const oee = Number(r.oee_pct);
     if (!Number.isNaN(oee)) {
       g.oee_pct_sum += oee;
       g.oee_pct_count += 1;
     }
-
     // Keep highest risk_score and its level if multiple rows
     const rowRisk =
       r.risk_score !== null && r.risk_score !== undefined
@@ -110,7 +94,6 @@ export function transformRowsToPOLevel(filteredRows) {
       g.risk_level = r.risk_level || g.risk_level;
     }
   });
-
   const poLevelData = Array.from(groups.values())
     .map((g) => ({
       po_number: g.po_number,
@@ -142,7 +125,6 @@ export function transformRowsToPOLevel(filteredRows) {
         : Infinity;
       return da - db;
     });
-
   // max risk (used only for color)
   let riskScore = null;
   let riskLevel = "No Data";
@@ -157,14 +139,11 @@ export function transformRowsToPOLevel(filteredRows) {
     });
     if (riskScore === null) riskLevel = "No Data";
   }
-
   return { poLevelData, riskSummary: { riskScore, riskLevel } };
 }
-
 /* ===========================
    Risk summarizer
    =========================== */
-
 export function summarizeRisk(poLines) {
   if (!poLines || poLines.length === 0) {
     return {
@@ -177,19 +156,16 @@ export function summarizeRisk(poLines) {
       overall_level: "No Data",
     };
   }
-
   const n_pos = poLines.length;
   let safe = 0;
   let med = 0;
   let high = 0;
   let scoreSum = 0;
   let scoreCount = 0;
-
   poLines.forEach((p) => {
     if (p.risk_level === "Safe") safe += 1;
     else if (p.risk_level === "Medium Risk") med += 1;
     else if (p.risk_level === "High Risk") high += 1;
-
     if (
       p.risk_score !== null &&
       p.risk_score !== undefined &&
@@ -199,12 +175,9 @@ export function summarizeRisk(poLines) {
       scoreCount += 1;
     }
   });
-
   const high_pct = n_pos > 0 ? high / n_pos : 0;
   const avg_risk_score = scoreCount > 0 ? scoreSum / scoreCount : null;
-
   let overall_level = "Need More Data";
-
   if (n_pos < 3) {
     overall_level = "Need More Data";
   } else if (high_pct >= 0.5 && (avg_risk_score ?? 0) >= 10) {
@@ -214,7 +187,6 @@ export function summarizeRisk(poLines) {
   } else {
     overall_level = "Safe";
   }
-
   return {
     n_pos,
     safe_count: safe,
@@ -225,11 +197,9 @@ export function summarizeRisk(poLines) {
     overall_level,
   };
 }
-
 /* ===========================
    Bubble map helpers
    =========================== */
-
 // Simple city-level overrides (optional refinement)
 const CITY_COORDS = {
   "dallas, tx": [-96.797, 32.7767],
@@ -243,16 +213,13 @@ const CITY_COORDS = {
   "chicago, il": [-87.6298, 41.8781],
   "los angeles, ca": [-118.2437, 34.0522],
 };
-
 // Heuristic mapping from region/location → [lon, lat]
 function getCoords(region, location) {
   const loc = location ? String(location).trim().toLowerCase() : "";
   if (loc && CITY_COORDS[loc]) {
     return CITY_COORDS[loc];
   }
-
   const regionStr = region ? String(region).trim().toLowerCase() : "";
-
   // Region-based fallbacks
   if (
     regionStr.includes("north america") ||
@@ -277,7 +244,6 @@ function getCoords(region, location) {
   ) {
     return [105, 15];
   }
-
   // Location-only fallbacks if region is missing/unclear
   if (loc.includes("usa") || loc.includes("united states") || loc.includes("tx")) {
     return [-98, 39];
@@ -293,16 +259,12 @@ function getCoords(region, location) {
   ) {
     return [105, 15];
   }
-
   return null;
 }
-
 // Build bubble nodes aggregated by physical location & role
 function buildBubbleMapData(filteredRows) {
   if (!filteredRows || !filteredRows.length) return [];
-
   const nodeMap = new Map();
-
   const ensureNode = (role, id, name, region, location, row) => {
     if (!id || !location) return;
     if (!nodeMap.has(id)) {
@@ -321,30 +283,30 @@ function buildBubbleMapData(filteredRows) {
         oee_count: 0,
         risk_sum: 0,
         risk_count: 0,
+        // On-time delivery tracking
+        on_time_count: 0,
+        on_time_total: 0,
+        // Delayed days tracking (for when on-time is 0%)
+        delayed_days_sum: 0,
+        delayed_days_count: 0,
       });
     }
     const n = nodeMap.get(id);
-
     if (row.po_number) n.poSet.add(row.po_number);
-
     const cost = Number(row.total_cost);
     if (!Number.isNaN(cost)) n.total_cost_sum += cost;
-
     const ltd = Number(row.lead_time_days);
     if (!Number.isNaN(ltd)) {
       n.lead_time_sum += ltd;
       n.lead_time_count += 1;
     }
-
     const defect = Number(row.defect_quantity);
     if (!Number.isNaN(defect)) n.defect_qty_sum += defect;
-
     const oee = Number(row.oee_pct);
     if (!Number.isNaN(oee)) {
       n.oee_sum += oee;
       n.oee_count += 1;
     }
-
     const rs =
       row.risk_score !== null && row.risk_score !== undefined
         ? Number(row.risk_score)
@@ -353,8 +315,45 @@ function buildBubbleMapData(filteredRows) {
       n.risk_sum += rs;
       n.risk_count += 1;
     }
-  };
 
+    // On-time delivery tracking - calculate from actual vs planned delivery dates
+    const actualDateStr = row.actual_delivery_date;
+    const plannedDateStr = row.planned_delivery_date;
+    
+    // Check if both dates exist and are not empty strings
+    if (
+      actualDateStr != null &&
+      actualDateStr !== "" &&
+      plannedDateStr != null &&
+      plannedDateStr !== ""
+    ) {
+      const actualDate = new Date(actualDateStr);
+      const plannedDate = new Date(plannedDateStr);
+      
+      // Check if both dates are valid (not NaN)
+      if (
+        !Number.isNaN(actualDate.getTime()) &&
+        !Number.isNaN(plannedDate.getTime())
+      ) {
+        n.on_time_total += 1;
+        // Compare dates at day level (ignore time)
+        // Normalize to midnight for accurate day comparison
+        const actualDay = new Date(actualDate.getFullYear(), actualDate.getMonth(), actualDate.getDate());
+        const plannedDay = new Date(plannedDate.getFullYear(), plannedDate.getMonth(), plannedDate.getDate());
+        
+        // On-time if actual <= planned (delivered on or before planned date)
+        if (actualDay.getTime() <= plannedDay.getTime()) {
+          n.on_time_count += 1;
+        } else {
+          // Track delayed days for late deliveries
+          const delayedMs = actualDay.getTime() - plannedDay.getTime();
+          const delayedDays = Math.floor(delayedMs / (1000 * 60 * 60 * 24));
+          n.delayed_days_sum += delayedDays;
+          n.delayed_days_count += 1;
+        }
+      }
+    }
+  };
   filteredRows.forEach((r) => {
     // Customer node
     const custLoc = r.customer_location || null;
@@ -364,7 +363,6 @@ function buildBubbleMapData(filteredRows) {
       const id = `customer:${custLoc}`;
       ensureNode("customer", id, custName, custRegion, custLoc, r);
     }
-
     // Supplier node
     const suppLoc = r.supplier_location || null;
     const suppRegion = r.supplier_region || null;
@@ -373,7 +371,6 @@ function buildBubbleMapData(filteredRows) {
       const id = `supplier:${suppLoc}`;
       ensureNode("supplier", id, suppName, suppRegion, suppLoc, r);
     }
-
     // Plant node
     const plantLoc = r.plant_location || r.plant_id || null;
     const plantRegion = r.plant_region || null;
@@ -383,26 +380,30 @@ function buildBubbleMapData(filteredRows) {
       ensureNode("plant", id, plantName, plantRegion, plantLoc, r);
     }
   });
-
   const nodes = [];
-
   nodeMap.forEach((n) => {
     const coords = getCoords(n.region, n.location);
     if (!coords) return; // skip nodes without usable coordinates
-
     const po_count = n.poSet.size;
     const avg_lead_time_days =
       n.lead_time_count > 0 ? n.lead_time_sum / n.lead_time_count : null;
     const avg_oee_pct = n.oee_count > 0 ? n.oee_sum / n.oee_count : null;
     const avg_risk_score =
       n.risk_count > 0 ? n.risk_sum / n.risk_count : null;
-
     let risk_bucket = "No Data";
     if (avg_risk_score !== null && !Number.isNaN(avg_risk_score)) {
       if (avg_risk_score >= 11) risk_bucket = "High";
       else if (avg_risk_score >= 5) risk_bucket = "Medium";
       else if (avg_risk_score < 5) risk_bucket = "Safe";
     }
+
+    // Calculate on-time delivery percentage
+    const on_time_delivery_pct =
+      n.on_time_total > 0 ? (n.on_time_count / n.on_time_total) * 100 : null;
+
+    // Calculate average delayed days (for when on-time delivery is 0%)
+    const avg_delayed_days =
+      n.delayed_days_count > 0 ? n.delayed_days_sum / n.delayed_days_count : null;
 
     nodes.push({
       id: n.id,
@@ -418,22 +419,27 @@ function buildBubbleMapData(filteredRows) {
       avg_oee_pct,
       avg_risk_score,
       risk_bucket,
+      on_time_delivery_pct,
+      avg_delayed_days,
     });
   });
-
   return nodes;
 }
-
 /* ===========================
    Geo bubble map component
    =========================== */
-
 const WORLD_GEO_URL =
   "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
-
 function BubbleSupplyMap({ nodes, filters }) {
-  const plottedNodes = Array.isArray(nodes) ? nodes.filter((n) => n.coords) : [];
-
+  const plottedNodes = Array.isArray(nodes)
+    ? nodes
+        .filter((n) => n.coords)
+        // Sort so suppliers render last (on top) to ensure visibility
+        .sort((a, b) => {
+          const roleOrder = { customer: 0, plant: 1, supplier: 2 };
+          return (roleOrder[a.role] || 0) - (roleOrder[b.role] || 0);
+        })
+    : [];
   const hasData = plottedNodes.length > 0 && filters.customer;
   if (!hasData) {
     return (
@@ -449,7 +455,6 @@ function BubbleSupplyMap({ nodes, filters }) {
       </div>
     );
   }
-
   // Auto-center & zoom based on node coordinates
   let center = [20, 20];
   let zoom = 1.3;
@@ -463,55 +468,49 @@ function BubbleSupplyMap({ nodes, filters }) {
     const spanLon = Math.abs(maxLon - minLon);
     const spanLat = Math.abs(maxLat - minLat);
     const span = Math.max(spanLon, spanLat);
-
     center = [(minLon + maxLon) / 2 || 20, (minLat + maxLat) / 2 || 20];
-
     if (span > 120) zoom = 0.9;
     else if (span > 60) zoom = 1.2;
     else if (span > 30) zoom = 1.6;
     else zoom = 2.0;
   }
-
-  const bubbleRadius = (node) => {
-    const base = Math.log10((node.total_cost_sum || 0) + 10);
-    const scaled = base * 4;
-    return Math.min(20, Math.max(6, scaled));
+  const bubbleRadius = () => {
+    // Constant size for all bubbles
+    return 10;
   };
-
   const roleFill = (role) => {
     if (role === "customer") return "#22c55e"; // emerald
     if (role === "supplier") return "#f97316"; // orange
     if (role === "plant") return "#38bdf8"; // blue
     return "#6b7280";
   };
-
-  const riskStroke = (bucket) => {
-    if (bucket === "High") return "#ef4444"; // red
-    if (bucket === "Medium") return "#facc15"; // yellow
-    if (bucket === "Safe") return "#22c55e"; // green
-    return "#0d9488"; // teal-ish for "No Data"
-  };
-
-  // Small role-based offsets so bubbles at the same location don't fully overlap
+  // Circular arrangement: place bubbles at 120° angles around the center point
+  // Increased radius to prevent overlap when multiple bubbles share the same location
   const offsetCoordsForRole = (node) => {
     const [lon, lat] = node.coords;
-    const delta = 1; // ~1 degree separation – enough to see distinct bubbles
-
+    const radius = 2.8; // degrees - increased separation distance from center
+    
+    // Convert degrees to radians for calculations
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    
+    let angleDeg = 0; // Default (north)
     if (node.role === "customer") {
-      // Keep customer near the original point
-      return [lon, lat];
+      angleDeg = 0; // North (0°)
+    } else if (node.role === "supplier") {
+      angleDeg = 240; // Southwest (240°)
+    } else if (node.role === "plant") {
+      angleDeg = 120; // Northeast (120°)
     }
-    if (node.role === "supplier") {
-      // Shift slightly west/south
-      return [lon - delta, lat - delta * 0.4];
-    }
-    if (node.role === "plant") {
-      // Shift slightly east/south
-      return [lon + delta, lat - delta * 0.4];
-    }
-    return [lon, lat];
+    
+    const angleRad = toRad(angleDeg);
+    // Calculate offset: longitude changes with cosine, latitude with sine
+    // (adjusted for Mercator projection where longitude scales with latitude)
+    const latAdjust = Math.cos(toRad(lat)); // Account for latitude compression
+    const offsetLon = lon + (radius * Math.sin(angleRad)) / latAdjust;
+    const offsetLat = lat + radius * Math.cos(angleRad);
+    
+    return [offsetLon, offsetLat];
   };
-
   const tooltipTitle = (node) => {
     const headerPrefix =
       node.role === "customer"
@@ -520,53 +519,56 @@ function BubbleSupplyMap({ nodes, filters }) {
         ? "Supplier"
         : "Plant";
 
-    const header = `${headerPrefix}: ${node.name} (${node.region ?? "—"} — ${
-      node.location ?? "—"
-    })`;
+    const regionStr = node.region ? `Region: ${node.region}` : "Region: —";
+    const locationStr = node.location ? `Location: ${node.location}` : "Location: —";
+    const header = `${headerPrefix}: ${node.name}\n${regionStr}, ${locationStr}`;
 
-    const poLine = `POs: ${node.po_count ?? 0}`;
-    const costLine = `Total Cost: $${Number(
-      node.total_cost_sum || 0
-    ).toLocaleString()}`;
-    const leadLine = `Avg Lead Time: ${
+    // Show delayed days when on-time delivery is 0%, otherwise just show percentage
+    let onTimeLine;
+    if (
+      node.on_time_delivery_pct != null &&
+      !Number.isNaN(node.on_time_delivery_pct) &&
+      node.on_time_delivery_pct === 0 &&
+      node.avg_delayed_days != null &&
+      !Number.isNaN(node.avg_delayed_days)
+    ) {
+      onTimeLine = `On-time delivery: 0.0% (Delayed: ${node.avg_delayed_days.toFixed(1)} days)`;
+    } else if (
+      node.on_time_delivery_pct != null &&
+      !Number.isNaN(node.on_time_delivery_pct)
+    ) {
+      onTimeLine = `On-time delivery: ${node.on_time_delivery_pct.toFixed(1)}%`;
+    } else {
+      onTimeLine = `On-time delivery: —`;
+    }
+
+    const leadTimeLine = `Avg lead time: ${
       node.avg_lead_time_days != null && !Number.isNaN(node.avg_lead_time_days)
-        ? node.avg_lead_time_days.toFixed(1)
-        : "—"
-    } days`;
-    const defectLine = `Defect Qty: ${node.defect_qty_sum ?? 0}`;
-    const oeeLine = `Avg OEE: ${
-      node.avg_oee_pct != null && !Number.isNaN(node.avg_oee_pct)
-        ? `${node.avg_oee_pct.toFixed(1)}%`
+        ? `${node.avg_lead_time_days.toFixed(1)} days`
         : "—"
     }`;
-    const riskScoreLine = `Avg Risk Score: ${
-      node.avg_risk_score != null && !Number.isNaN(node.avg_risk_score)
-        ? node.avg_risk_score.toFixed(1)
-        : "—"
-    } (${node.risk_bucket})`;
+
+    const costLine = `Total cost: $${Number(
+      node.total_cost_sum || 0
+    ).toLocaleString()}`;
 
     return [
       header,
-      poLine,
+      onTimeLine,
+      leadTimeLine,
       costLine,
-      leadLine,
-      defectLine,
-      oeeLine,
-      riskScoreLine,
     ].join("\n");
   };
-
   return (
     <div className="mt-8 bg-[#0b1210]/70 border border-emerald-500/40 rounded-2xl p-6 shadow-lg backdrop-blur-sm">
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
         <div>
           <h3 className="text-sm font-semibold text-white">Location Footprint</h3>
           <p className="mt-1 text-xs text-emerald-100/70">
-            Bubble size = PO cost, fill color = role, border color = risk.
+            Visualize the geographic distribution of your supply chain network. Identify customer, supplier, and plant locations to optimize logistics and reduce lead times.
           </p>
         </div>
       </div>
-
       {/* Zoomable bubble map */}
       <div className="w-full" style={{ height: 420 }}>
         <ComposableMap
@@ -588,16 +590,13 @@ function BubbleSupplyMap({ nodes, filters }) {
                 ))
               }
             </Geographies>
-
-            {/* Bubbles per physical location (role-offset to avoid perfect overlap) */}
+            {/* Bubbles per physical location (circular arrangement to avoid overlap) */}
             {plottedNodes.map((node) => (
               <Marker key={node.id} coordinates={offsetCoordsForRole(node)}>
                 <title>{tooltipTitle(node)}</title>
                 <circle
-                  r={bubbleRadius(node)}
+                  r={bubbleRadius()}
                   fill={roleFill(node.role)}
-                  stroke={riskStroke(node.risk_bucket)}
-                  strokeWidth={1.4}
                   opacity={0.9}
                 />
               </Marker>
@@ -605,9 +604,8 @@ function BubbleSupplyMap({ nodes, filters }) {
           </ZoomableGroup>
         </ComposableMap>
       </div>
-
       {/* Legend below map */}
-      <div className="mt-4 grid gap-3 md:grid-cols-3 text-xs text-emerald-100/80">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 text-xs text-emerald-100/80">
         <div>
           <div className="font-semibold text-emerald-200 mb-1">Legend</div>
           <p className="flex items-center gap-2">
@@ -622,45 +620,31 @@ function BubbleSupplyMap({ nodes, filters }) {
             <span className="inline-block w-2 h-2 rounded-full bg-sky-400" />
             <span>Blue circle = Plant location</span>
           </p>
-          <p className="mt-1">Bubble size scales with total PO cost.</p>
-        </div>
-        <div>
-          <div className="font-semibold text-emerald-200 mb-1">
-            Risk (border color)
-          </div>
-          <p>Green = Safe</p>
-          <p>Yellow = Medium</p>
-          <p>Red = High</p>
-          <p>Teal = No Data</p>
         </div>
         <div>
           <div className="font-semibold text-emerald-200 mb-1">
             How to read
           </div>
           <p>Each bubble represents a customer, supplier, or plant location.</p>
-          <p>Hover a bubble to see PO count, cost, lead time, quality, and risk.</p>
+          <p>Hover a bubble to see on-time delivery, lead time, and total cost.</p>
         </div>
       </div>
     </div>
   );
 }
-
 /* ===========================
    Main dashboard
    =========================== */
-
 function IntegratedDashboard({ onBack }) {
   const [rows, setRows] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState(null);
-
   // Force a customer selection to avoid loading every PO; will auto-populate after fetch
   const [filters, setFilters] = useState({
     customer: "",
     part: "All",
     supplier: "All",
   });
-
   useEffect(() => {
     const loadData = async () => {
       setDataLoading(true);
@@ -669,7 +653,6 @@ function IntegratedDashboard({ onBack }) {
         const chunkSize = 5000;
         let offset = 0;
         let aggregated = [];
-
         while (true) {
           const { data, error } = await supabase
             .schema("crm")
@@ -688,28 +671,25 @@ function IntegratedDashboard({ onBack }) {
                 "plant_location",
                 "po_number",
                 "po_creation_date",
+                "planned_delivery_date",
+                "actual_delivery_date",
                 "total_cost",
                 "lead_time_days",
                 "defect_quantity",
                 "produced_quantity",
                 "good_pieces",
                 "oee_pct",
-                "on_time_fulfillment_flag",
                 "risk_score",
                 "risk_level",
               ].join(", ")
             )
             .range(offset, offset + chunkSize - 1);
-
           if (error) throw error;
-
           const batch = data || [];
           aggregated = aggregated.concat(batch);
-
           if (batch.length < chunkSize) break;
           offset += chunkSize;
         }
-
         setRows(aggregated);
       } catch (err) {
         console.error(err);
@@ -718,10 +698,8 @@ function IntegratedDashboard({ onBack }) {
         setDataLoading(false);
       }
     };
-
     loadData();
   }, []);
-
   // Build cascading options and filtered data
   const {
     customerOptions,
@@ -734,26 +712,21 @@ function IntegratedDashboard({ onBack }) {
     const customerOptions = Array.from(
       new Set(rows.map((r) => norm(r.customer_name)).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
-
     const customerFiltered = !filters.customer
       ? rows
       : rows.filter((r) => eqi(r.customer_name, filters.customer));
-
     const partOptions = Array.from(
       new Set(customerFiltered.map((r) => norm(r.part_name)).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
-
     let supplierSource = customerFiltered;
     if (filters.part !== "All") {
       supplierSource = supplierSource.filter((r) => eqi(r.part_name, filters.part));
     }
-
     const supplierOptions = Array.from(
       new Set(
         supplierSource.map((r) => norm(r.supplier_name)).filter(Boolean)
       )
     ).sort((a, b) => a.localeCompare(b));
-
     // Apply filters: customer required, part/supplier optional ("All")
     const filteredRows = rows.filter((r) => {
       if (!filters.customer) return false;
@@ -763,10 +736,8 @@ function IntegratedDashboard({ onBack }) {
         return false;
       return true;
     });
-
     const { poLevelData, riskSummary } = transformRowsToPOLevel(filteredRows);
     const bubbleNodes = buildBubbleMapData(filteredRows);
-
     return {
       customerOptions,
       partOptions,
@@ -776,7 +747,6 @@ function IntegratedDashboard({ onBack }) {
       bubbleNodes,
     };
   }, [rows, filters]);
-
   // Final chart dataset: keep only rows with a valid year <= 2025
   const chartData = useMemo(() => {
     // base: PO-level, capped at 2025
@@ -784,11 +754,9 @@ function IntegratedDashboard({ onBack }) {
       const yr = extractYear(p.po_creation_date);
       return yr !== null && yr <= 2025;
     });
-
     const aggregateByMonth =
       filters.part === "All" && filters.supplier === "All";
     if (!aggregateByMonth) return base;
-
     // bucket by month when part/vendor is "All"
     const buckets = new Map();
     base.forEach((p) => {
@@ -830,7 +798,6 @@ function IntegratedDashboard({ onBack }) {
         b.oee_count += 1;
       }
     });
-
     return Array.from(buckets.values())
       .map((b) => ({
         po_creation_date: b.po_creation_date,
@@ -846,7 +813,6 @@ function IntegratedDashboard({ onBack }) {
         (a, b) => new Date(a.po_creation_date) - new Date(b.po_creation_date)
       );
   }, [poLevelData, filters.part, filters.supplier]);
-
   // Auto-select first customer option once available
   useEffect(() => {
     if (!filters.customer && customerOptions.length > 0) {
@@ -871,7 +837,6 @@ function IntegratedDashboard({ onBack }) {
       }));
     }
   }, [customerOptions, filters.customer]);
-
   const riskColor =
     riskSummary.riskLevel === "High Risk"
       ? "text-red-300"
@@ -880,30 +845,25 @@ function IntegratedDashboard({ onBack }) {
       : riskSummary.riskLevel === "Safe"
       ? "text-emerald-300"
       : "text-emerald-100";
-
   const canShowRisk =
     Boolean(filters.customer) &&
     filters.part !== "All" &&
     filters.supplier !== "All";
-
   const distribution = useMemo(
     () => (canShowRisk ? summarizeRisk(poLevelData) : null),
     [canShowRisk, poLevelData]
   );
-
   // Reset dependent filters if invalid
   useEffect(() => {
     if (filters.part !== "All" && !partOptions.includes(filters.part)) {
       setFilters((prev) => ({ ...prev, part: "All", supplier: "All" }));
     }
   }, [partOptions, filters.part]);
-
   useEffect(() => {
     if (filters.supplier !== "All" && !supplierOptions.includes(filters.supplier)) {
       setFilters((prev) => ({ ...prev, supplier: "All" }));
     }
   }, [supplierOptions, filters.supplier]);
-
   return (
     <section className="max-w-7xl mx-auto mt-10 pt-2 pb-16 min-h-screen">
       <div className="rounded-3xl border border-emerald-500/40 bg-gradient-to-b from-emerald-900 via-emerald-800 to-emerald-900 px-5 py-6 shadow-emerald-900/40 shadow-2xl md:px-8 md:py-8">
@@ -921,7 +881,6 @@ function IntegratedDashboard({ onBack }) {
             Home / Integrated Analytics
           </div>
         </div>
-
         <div className="mt-6">
           <p className="inline-flex items-center gap-2 rounded-full bg-emerald-900/60 border border-emerald-400/40 px-4 py-1 text-xs text-emerald-100">
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-400" />
@@ -935,13 +894,11 @@ function IntegratedDashboard({ onBack }) {
             synchronized customer, part, and supplier filters.
           </p>
         </div>
-
         {dataError && (
           <p className="mt-4 text-xs text-red-200">
             Failed to load data: {dataError}
           </p>
         )}
-
         {/* Filters */}
         <div className="mt-6 grid gap-4 md:grid-cols-3">
           <div className="flex flex-col">
@@ -965,7 +922,6 @@ function IntegratedDashboard({ onBack }) {
               ))}
             </select>
           </div>
-
           <div className="flex flex-col">
             <label className="text-xs text-emerald-100/80 mb-1">Part</label>
             <select
@@ -987,7 +943,6 @@ function IntegratedDashboard({ onBack }) {
               ))}
             </select>
           </div>
-
           <div className="flex flex-col">
             <label className="text-xs text-emerald-100/80 mb-1">Vendor</label>
             <select
@@ -1009,7 +964,6 @@ function IntegratedDashboard({ onBack }) {
             </select>
           </div>
         </div>
-
         {/* Risk card */}
         <div className="mt-8 bg-[#0b1210]/70 border border-emerald-500/40 rounded-2xl p-6 shadow-lg backdrop-blur-sm">
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1020,7 +974,6 @@ function IntegratedDashboard({ onBack }) {
               </p>
             </div>
           </div>
-
           {!canShowRisk ? (
             <div className="text-xs text-emerald-100/70 mt-2">
               Select customer, part, and vendor to see risk.
@@ -1085,7 +1038,6 @@ function IntegratedDashboard({ onBack }) {
               </p>
             </div>
           </div>
-
           {dataLoading ? (
             <div className="text-xs text-emerald-100/70">Loading…</div>
           ) : dataError ? (
@@ -1197,12 +1149,10 @@ function IntegratedDashboard({ onBack }) {
             </div>
           )}
         </div>
-
         {/* Geo map */}
         <BubbleSupplyMap nodes={bubbleNodes} filters={filters} />
       </div>
     </section>
   );
 }
-
 export default IntegratedDashboard;
